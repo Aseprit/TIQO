@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import com.aseprit.tiqo.core.designsystem.theme.tiqoColors
 
 @Composable
 fun TiqoBackground(content: @Composable BoxScope.() -> Unit) {
@@ -73,10 +74,9 @@ fun GlassSurface(
                 shape,
             ),
         shape = shape,
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.74f),
+        color = MaterialTheme.tiqoColors.elevatedGlass.copy(alpha = MaterialTheme.tiqoColors.glassAlpha),
         tonalElevation = 0.dp,
         shadowElevation = 8.dp,
         content = content,
     )
 }
-

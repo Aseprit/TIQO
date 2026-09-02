@@ -1,25 +1,57 @@
 package com.aseprit.tiqo.core.designsystem.theme
 
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 internal val NightBackground = Color(0xFF09090E)
-internal val NightSurface = Color(0xFF17171F)
-internal val NightSurfaceVariant = Color(0xFF22222D)
-internal val NightText = Color(0xFFF7F5FF)
-internal val NightMutedText = Color(0xFFA7A4B3)
+internal val NightSurface = Color(0xFF16161E)
+internal val NightElevatedSurface = Color(0xFF20202A)
+internal val NightPrimaryText = Color(0xFFF8F7FC)
+internal val NightSecondaryText = Color(0xFFC9C6D2)
+internal val NightMutedText = Color(0xFF9995A4)
+internal val NightDisabledText = Color(0xFF77737F)
 
 internal val DayBackground = Color(0xFFF4F3F8)
-internal val DaySurface = Color(0xFFFFFFFF)
-internal val DaySurfaceVariant = Color(0xFFE9E7EF)
-internal val DayText = Color(0xFF19171F)
-internal val DayMutedText = Color(0xFF686471)
+internal val DaySurface = Color(0xFFFDFBFF)
+internal val DayElevatedSurface = Color(0xFFFFFFFF)
+internal val DayPrimaryText = Color(0xFF19171F)
+internal val DaySecondaryText = Color(0xFF4D4954)
+internal val DayMutedText = Color(0xFF706B78)
+internal val DayDisabledText = Color(0xFF8F8996)
 
-enum class TiqoAccent(val color: Color) {
-    Violet(Color(0xFF8B72FF)),
-    Blue(Color(0xFF5D8EFF)),
-    Cyan(Color(0xFF35C4D8)),
-    Green(Color(0xFF4BCB88)),
-    Orange(Color(0xFFFF9D54)),
-    Pink(Color(0xFFFF6FAE)),
+internal val DestructiveDark = Color(0xFFFF7784)
+internal val DestructiveLight = Color(0xFFB4233C)
+internal val SuccessDark = Color(0xFF62D99A)
+internal val SuccessLight = Color(0xFF087A45)
+
+@Immutable
+data class TiqoSemanticColors(
+    val primaryText: Color,
+    val secondaryText: Color,
+    val mutedText: Color,
+    val disabledText: Color,
+    val background: Color,
+    val elevatedGlass: Color,
+    val outline: Color,
+    val accent: Color,
+    val destructive: Color,
+    val success: Color,
+    val glassAlpha: Float,
+)
+
+internal val LocalTiqoSemanticColors = staticCompositionLocalOf {
+    TiqoSemanticColors(
+        primaryText = NightPrimaryText,
+        secondaryText = NightSecondaryText,
+        mutedText = NightMutedText,
+        disabledText = NightDisabledText,
+        background = NightBackground,
+        elevatedGlass = NightElevatedSurface,
+        outline = Color.White.copy(alpha = 0.16f),
+        accent = Color(0xFF8B72FF),
+        destructive = DestructiveDark,
+        success = SuccessDark,
+        glassAlpha = 0.74f,
+    )
 }
-

@@ -9,9 +9,13 @@ package com.aseprit.tiqo.ai
 interface LlmEngine {
     val descriptor: LlmDescriptor
 
-    suspend fun isAvailable(): Boolean
+    val isLoaded: kotlinx.coroutines.flow.StateFlow<Boolean>
 
-    suspend fun complete(request: LlmRequest): LlmResponse
+    suspend fun load(modelPath: String): Result<Unit>
+
+    fun generate(request: LlmRequest): kotlinx.coroutines.flow.Flow<LlmEvent>
+
+    suspend fun stopGeneration()
 
     suspend fun unload()
 }
@@ -45,11 +49,30 @@ data class LlmTool(
     val inputSchema: String,
 )
 
-sealed interface LlmResponse {
-    data class Text(val content: String) : LlmResponse
-
-    data class ToolCall(val name: String, val argumentsJson: String) : LlmResponse
-
-    data class Failure(val reason: String, val recoverable: Boolean) : LlmResponse
+sealed interface LlmEvent {
+    data class Token(val content: String) : LlmEvent
+    data class ToolCall(val name: String, val argumentsJson: String) : LlmEvent
+    data class Failure(val reason: String, val recoverable: Boolean) : LlmEvent
+    data object Finished : LlmEvent
 }
 
+class UnavailableLlmEngine : LlmEngine {
+    override val descriptor = LlmDescriptor(
+        id = "unavailable",
+        displayName = "Brak modelu",
+        capabilities = emptySet(),
+    )
+    private val loaded = kotlinx.coroutines.flow.MutableStateFlow(false)
+    override val isLoaded: kotlinx.coroutines.flow.StateFlow<Boolean> = loaded
+
+    override suspend fun load(modelPath: String): Result<Unit> =
+        Result.failure(IllegalStateException("Local model is not installed"))
+
+    override fun generate(request: LlmRequest): kotlinx.coroutines.flow.Flow<LlmEvent> =
+        kotlinx.coroutines.flow.flowOf(
+            LlmEvent.Failure("Local model is not installed", recoverable = true),
+        )
+
+    override suspend fun stopGeneration() = Unit
+    override suspend fun unload() = Unit
+}

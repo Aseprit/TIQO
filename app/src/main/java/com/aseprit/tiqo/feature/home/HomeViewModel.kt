@@ -1,93 +1,136 @@
 package com.aseprit.tiqo.feature.home
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.aseprit.tiqo.data.repository.InMemoryTaskRepository
-import com.aseprit.tiqo.domain.model.PlannerTask
-import com.aseprit.tiqo.domain.model.RecurrenceRule
-import com.aseprit.tiqo.domain.repository.TaskRepository
+import com.aseprit.tiqo.data.settings.SettingsRepository
+import com.aseprit.tiqo.domain.model.PlannerItem
+import com.aseprit.tiqo.domain.model.PlannerOccurrence
+import com.aseprit.tiqo.domain.model.ReminderOffset
+import com.aseprit.tiqo.domain.repository.PlannerRepository
+import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.MonthDay
+import java.time.LocalTime
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 data class HomeUiState(
     val selectedDate: LocalDate = LocalDate.now(),
-    val tasks: List<PlannerTask> = emptyList(),
+    val occurrences: List<PlannerOccurrence> = emptyList(),
+    val showCompleted: Boolean = true,
+    val defaultTaskTime: LocalTime = LocalTime.of(9, 0),
+    val defaultReminder: ReminderOffset? = null,
+    val firstDayOfWeek: DayOfWeek = DayOfWeek.MONDAY,
 )
 
+sealed interface HomeEvent {
+    data class CompletionChanged(val completed: Boolean) : HomeEvent
+    data object ItemSaved : HomeEvent
+    data object ItemDeleted : HomeEvent
+}
+
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class HomeViewModel(
-    private val repository: TaskRepository = InMemoryTaskRepository(),
+    private val repository: PlannerRepository,
+    private val settingsRepository: SettingsRepository,
+    initialDate: LocalDate,
 ) : ViewModel() {
-    private val selectedDate = MutableStateFlow(LocalDate.now())
-    private var recentlyDeletedTask: PlannerTask? = null
+    private val selectedDate = MutableStateFlow(initialDate)
+    private val eventChannel = Channel<HomeEvent>(Channel.BUFFERED)
+    val events = eventChannel.receiveAsFlow()
+
+    private data class CompletionUndo(
+        val itemId: Long,
+        val date: LocalDate,
+        val previousValue: Boolean,
+    )
+
+    private var completionUndo: CompletionUndo? = null
 
     val uiState: StateFlow<HomeUiState> = combine(
         selectedDate,
-        repository.tasks,
-    ) { date, tasks ->
+        selectedDate.flatMapLatest(repository::observeOccurrences),
+        settingsRepository.settings,
+    ) { date, occurrences, settings ->
         HomeUiState(
             selectedDate = date,
-            tasks = tasks
-                .filter { it.occursOn(date) }
-                .sortedWith(compareBy<PlannerTask> { it.isCompleted }.thenBy { it.time }),
+            occurrences = if (settings.showCompletedTasks) {
+                occurrences
+            } else {
+                occurrences.filterNot { it.isCompleted }
+            },
+            showCompleted = settings.showCompletedTasks,
+            defaultTaskTime = settings.defaultTaskTime,
+            defaultReminder = settings.defaultReminder,
+            firstDayOfWeek = settings.firstDayOfWeek,
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
-        initialValue = HomeUiState(),
+        initialValue = HomeUiState(selectedDate = initialDate),
     )
 
     fun selectDate(date: LocalDate) {
         selectedDate.value = date
     }
 
-    fun toggleCompleted(taskId: Long) {
-        viewModelScope.launch { repository.toggleCompleted(taskId) }
+    fun moveWeek(offset: Long) {
+        selectedDate.value = selectedDate.value.plusWeeks(offset)
     }
 
-    fun saveTask(
-        existing: PlannerTask?,
-        title: String,
-        description: String,
-    ) {
-        val cleanTitle = title.trim()
-        if (cleanTitle.isEmpty()) return
-
+    fun toggleCompleted(occurrence: PlannerOccurrence) {
+        if (occurrence.item.type != com.aseprit.tiqo.domain.model.PlannerItemType.Task) return
         viewModelScope.launch {
-            repository.save(
-                existing?.copy(
-                    title = cleanTitle,
-                    description = description.trim(),
-                ) ?: PlannerTask(
-                    id = System.currentTimeMillis(),
-                    title = cleanTitle,
-                    description = description.trim(),
-                    date = selectedDate.value,
-                ),
+            completionUndo = CompletionUndo(
+                itemId = occurrence.item.id,
+                date = occurrence.date,
+                previousValue = occurrence.isCompleted,
             )
+            repository.setCompleted(
+                occurrence.item.id,
+                occurrence.date,
+                !occurrence.isCompleted,
+            )
+            eventChannel.send(HomeEvent.CompletionChanged(!occurrence.isCompleted))
         }
     }
 
-    fun delete(task: PlannerTask) {
-        recentlyDeletedTask = task
-        viewModelScope.launch { repository.delete(task.id) }
+    fun undoCompletion() {
+        val undo = completionUndo ?: return
+        completionUndo = null
+        viewModelScope.launch {
+            repository.setCompleted(undo.itemId, undo.date, undo.previousValue)
+        }
     }
 
-    fun undoDelete() {
-        val task = recentlyDeletedTask ?: return
-        recentlyDeletedTask = null
-        viewModelScope.launch { repository.save(task) }
+    fun save(item: PlannerItem) {
+        viewModelScope.launch {
+            repository.save(item)
+            eventChannel.send(HomeEvent.ItemSaved)
+        }
+    }
+
+    fun delete(itemId: Long) {
+        viewModelScope.launch {
+            repository.delete(itemId)
+            eventChannel.send(HomeEvent.ItemDeleted)
+        }
+    }
+
+    class Factory(
+        private val repository: PlannerRepository,
+        private val settingsRepository: SettingsRepository,
+        private val initialDate: LocalDate,
+    ) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+            HomeViewModel(repository, settingsRepository, initialDate) as T
     }
 }
-
-private fun PlannerTask.occursOn(targetDate: LocalDate): Boolean = when (val rule = recurrence) {
-    RecurrenceRule.Once -> date == targetDate
-    is RecurrenceRule.Weekly -> targetDate >= date && targetDate.dayOfWeek in rule.days
-    is RecurrenceRule.Yearly -> targetDate >= date && MonthDay.from(targetDate) == rule.day
-}
-

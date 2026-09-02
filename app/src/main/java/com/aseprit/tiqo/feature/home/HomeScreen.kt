@@ -1,6 +1,10 @@
 package com.aseprit.tiqo.feature.home
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -24,11 +28,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.Cake
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Event
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -38,83 +50,136 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
+import com.aseprit.tiqo.R
 import com.aseprit.tiqo.core.designsystem.component.GlassSurface
-import com.aseprit.tiqo.domain.model.PlannerTask
+import com.aseprit.tiqo.core.designsystem.theme.tiqoAnimationsEnabled
+import com.aseprit.tiqo.domain.model.PlannerItem
+import com.aseprit.tiqo.domain.model.PlannerItemType
+import com.aseprit.tiqo.domain.model.PlannerOccurrence
 import com.aseprit.tiqo.domain.model.RecurrenceRule
+import com.aseprit.tiqo.feature.editor.PlannerItemEditor
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
-import kotlinx.coroutines.launch
 
 private val PolishLocale = Locale("pl", "PL")
 
 @Composable
-fun HomeRoute(viewModel: HomeViewModel = viewModel()) {
+fun HomeRoute(
+    viewModel: HomeViewModel,
+    selectedDate: LocalDate,
+    onSelectedDateChange: (LocalDate) -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenStatistics: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbar = remember { SnackbarHostState() }
+    val completedMessage = stringResource(R.string.task_completed)
+    val reopenedMessage = stringResource(R.string.task_reopened)
+    val undoLabel = stringResource(R.string.undo)
+    val savedMessage = stringResource(R.string.item_saved)
+    val deletedMessage = stringResource(R.string.item_deleted)
+
+    LaunchedEffect(selectedDate) {
+        if (selectedDate != uiState.selectedDate) viewModel.selectDate(selectedDate)
+    }
+
+    LaunchedEffect(uiState.selectedDate) {
+        onSelectedDateChange(uiState.selectedDate)
+    }
+    LaunchedEffect(Unit) {
+        viewModel.events.collect { event ->
+            when (event) {
+                is HomeEvent.CompletionChanged -> {
+                    val result = snackbar.showSnackbar(
+                        message = if (event.completed) completedMessage else reopenedMessage,
+                        actionLabel = undoLabel,
+                        withDismissAction = true,
+                    )
+                    if (result == SnackbarResult.ActionPerformed) viewModel.undoCompletion()
+                }
+                HomeEvent.ItemDeleted -> snackbar.showSnackbar(deletedMessage)
+                HomeEvent.ItemSaved -> snackbar.showSnackbar(savedMessage)
+            }
+        }
+    }
 
     HomeScreen(
         uiState = uiState,
+        snackbar = snackbar,
         onDateSelected = viewModel::selectDate,
+        onMoveWeek = viewModel::moveWeek,
         onToggleCompleted = viewModel::toggleCompleted,
-        onSaveTask = viewModel::saveTask,
-        onDeleteTask = viewModel::delete,
-        onUndoDelete = viewModel::undoDelete,
+        onSave = viewModel::save,
+        onDelete = viewModel::delete,
+        onOpenSettings = onOpenSettings,
+        onOpenStatistics = onOpenStatistics,
+        onRequestNotificationPermission = onRequestNotificationPermission,
     )
 }
 
 @Composable
 private fun HomeScreen(
     uiState: HomeUiState,
+    snackbar: SnackbarHostState,
     onDateSelected: (LocalDate) -> Unit,
-    onToggleCompleted: (Long) -> Unit,
-    onSaveTask: (PlannerTask?, String, String) -> Unit,
-    onDeleteTask: (PlannerTask) -> Unit,
-    onUndoDelete: () -> Unit,
+    onMoveWeek: (Long) -> Unit,
+    onToggleCompleted: (PlannerOccurrence) -> Unit,
+    onSave: (PlannerItem) -> Unit,
+    onDelete: (Long) -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenStatistics: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
 ) {
-    var detailsTask by remember { mutableStateOf<PlannerTask?>(null) }
-    var editorTask by remember { mutableStateOf<PlannerTask?>(null) }
+    var details by remember { mutableStateOf<PlannerOccurrence?>(null) }
+    var editorItem by remember { mutableStateOf<PlannerItem?>(null) }
     var editorVisible by remember { mutableStateOf(false) }
-    val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
+    var deleteTarget by remember { mutableStateOf<PlannerItem?>(null) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 112.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                DateHeader(date = uiState.selectedDate)
-                Spacer(modifier = Modifier.height(22.dp))
-                WeekStrip(
-                    selectedDate = uiState.selectedDate,
-                    onDateSelected = onDateSelected,
+                DateHeader(
+                    date = uiState.selectedDate,
+                    onOpenSettings = onOpenSettings,
+                    onOpenStatistics = onOpenStatistics,
                 )
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(Modifier.height(18.dp))
+                WeekNavigation(onPrevious = { onMoveWeek(-1) }, onNext = { onMoveWeek(1) })
+                Spacer(Modifier.height(8.dp))
+                WeekStrip(uiState.selectedDate, uiState.firstDayOfWeek, onDateSelected)
+                Spacer(Modifier.height(22.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -122,167 +187,195 @@ private fun HomeScreen(
                 ) {
                     Text(
                         text = if (uiState.selectedDate == LocalDate.now()) {
-                            "Dzisiaj"
+                            stringResource(R.string.today)
                         } else {
-                            uiState.selectedDate.dayOfWeek
-                                .getDisplayName(TextStyle.FULL, PolishLocale)
+                            uiState.selectedDate.dayOfWeek.getDisplayName(TextStyle.FULL, PolishLocale)
                                 .replaceFirstChar { it.titlecase(PolishLocale) }
                         },
                         style = MaterialTheme.typography.titleLarge,
                     )
+                    val tasks = uiState.occurrences.filter { it.item.type == PlannerItemType.Task }
                     Text(
-                        text = "${uiState.tasks.count { it.isCompleted }}/${uiState.tasks.size}",
-                        style = MaterialTheme.typography.labelMedium,
+                        stringResource(R.string.tasks_count, tasks.count { it.isCompleted }, tasks.size),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
-            if (uiState.tasks.isEmpty()) {
-                item { EmptyDayCard() }
+            if (uiState.occurrences.isEmpty()) {
+                item {
+                    EmptyDayCard(onAdd = {
+                        editorItem = null
+                        editorVisible = true
+                    })
+                }
             } else {
-                items(uiState.tasks, key = { it.id }) { task ->
-                    TaskCard(
-                        task = task,
-                        onClick = { onToggleCompleted(task.id) },
-                        onLongClick = { detailsTask = task },
+                items(uiState.occurrences, key = { it.stableKey }) { occurrence ->
+                    PlannerOccurrenceCard(
+                        occurrence = occurrence,
+                        onClick = { onToggleCompleted(occurrence) },
+                        onLongClick = { details = occurrence },
                     )
                 }
             }
         }
 
         FloatingActionButton(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(20.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
             onClick = {
-                editorTask = null
+                editorItem = null
                 editorVisible = true
             },
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
             shape = CircleShape,
-        ) {
-            Icon(Icons.Rounded.Add, contentDescription = "Dodaj task")
-        }
+            containerColor = MaterialTheme.colorScheme.primary,
+        ) { Icon(Icons.Rounded.Add, stringResource(R.string.add_item)) }
 
         SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+            hostState = snackbar,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp),
         )
     }
 
-    detailsTask?.let { task ->
-        TaskDetailsSheet(
-            task = task,
-            onDismiss = { detailsTask = null },
+    details?.let { occurrence ->
+        OccurrenceDetails(
+            occurrence = occurrence,
+            onDismiss = { details = null },
             onEdit = {
-                detailsTask = null
-                editorTask = task
+                details = null
+                editorItem = occurrence.item
                 editorVisible = true
             },
             onDelete = {
-                detailsTask = null
-                onDeleteTask(task)
-                coroutineScope.launch {
-                    val result = snackbarHostState.showSnackbar(
-                        message = "Task usunięty",
-                        actionLabel = "Cofnij",
-                        withDismissAction = true,
-                    )
-                    if (result == SnackbarResult.ActionPerformed) onUndoDelete()
-                }
+                details = null
+                deleteTarget = occurrence.item
             },
         )
     }
 
     if (editorVisible) {
-        TaskEditorDialog(
-            task = editorTask,
+        PlannerItemEditor(
+            item = editorItem,
+            initialDate = uiState.selectedDate,
+            defaultTime = uiState.defaultTaskTime,
+            defaultReminder = uiState.defaultReminder,
             onDismiss = { editorVisible = false },
-            onSave = { title, description ->
-                onSaveTask(editorTask, title, description)
+            onReminderSelected = onRequestNotificationPermission,
+            onSave = {
                 editorVisible = false
+                onSave(it)
+            },
+        )
+    }
+
+    deleteTarget?.let { item ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text(stringResource(R.string.confirm_delete_title)) },
+            text = { Text(stringResource(R.string.confirm_delete_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteTarget = null
+                    onDelete(item.id)
+                }) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
 }
 
 @Composable
-private fun DateHeader(date: LocalDate) {
-    val dayName = date.dayOfWeek
-        .getDisplayName(TextStyle.FULL, PolishLocale)
+private fun DateHeader(
+    date: LocalDate,
+    onOpenSettings: () -> Unit,
+    onOpenStatistics: () -> Unit,
+) {
+    val day = date.dayOfWeek.getDisplayName(TextStyle.FULL, PolishLocale)
         .replaceFirstChar { it.titlecase(PolishLocale) }
-    val exactDate = date.format(DateTimeFormatter.ofPattern("d MMMM yyyy", PolishLocale))
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        Column {
-            Text(
-                text = "TIQO",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(text = dayName, style = MaterialTheme.typography.displaySmall)
+    val formatted = date.format(DateTimeFormatter.ofPattern("d MMMM yyyy", PolishLocale))
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("TIQO", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onOpenStatistics) {
+                Icon(Icons.Rounded.BarChart, stringResource(R.string.statistics))
+            }
+            IconButton(onClick = onOpenSettings) {
+                Icon(Icons.Rounded.Settings, stringResource(R.string.settings))
+            }
         }
-        Text(
-            text = exactDate,
-            modifier = Modifier.padding(bottom = 6.dp),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Text(day, style = MaterialTheme.typography.displaySmall)
+            Text(
+                formatted,
+                modifier = Modifier.padding(bottom = 6.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeekNavigation(onPrevious: () -> Unit, onNext: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        IconButton(onClick = onPrevious) {
+            Icon(Icons.Rounded.ChevronLeft, stringResource(R.string.previous_week))
+        }
+        IconButton(onClick = onNext) {
+            Icon(Icons.Rounded.ChevronRight, stringResource(R.string.next_week))
+        }
     }
 }
 
 @Composable
 private fun WeekStrip(
     selectedDate: LocalDate,
+    firstDayOfWeek: DayOfWeek,
     onDateSelected: (LocalDate) -> Unit,
 ) {
-    val startOfWeek = selectedDate.minusDays((selectedDate.dayOfWeek.value - DayOfWeek.MONDAY.value).toLong())
-    GlassSurface(modifier = Modifier.fillMaxWidth(), cornerRadius = 28.dp) {
+    val animationSpec = if (MaterialTheme.tiqoAnimationsEnabled) tween<Color>(200) else snap()
+    val daysFromStart = (selectedDate.dayOfWeek.value - firstDayOfWeek.value + 7) % 7
+    val start = selectedDate.minusDays(daysFromStart.toLong())
+    val today = LocalDate.now()
+    GlassSurface(Modifier.fillMaxWidth(), cornerRadius = 28.dp) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(8.dp),
+            Modifier.fillMaxWidth().padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             repeat(7) { index ->
-                val date = startOfWeek.plusDays(index.toLong())
+                val date = start.plusDays(index.toLong())
                 val selected = date == selectedDate
-                val containerColor by animateColorAsState(
-                    targetValue = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    label = "week-day-color",
+                val container by animateColorAsState(
+                    if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                    animationSpec = animationSpec,
+                    label = "selected-day",
                 )
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(20.dp))
-                        .background(containerColor)
+                        .background(container)
+                        .then(
+                            if (date == today && !selected) {
+                                Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(20.dp))
+                            } else Modifier
+                        )
                         .clickable { onDateSelected(date) }
                         .padding(vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = date.dayOfWeek.getDisplayName(TextStyle.SHORT, PolishLocale)
-                            .take(2)
-                            .uppercase(PolishLocale),
+                        date.dayOfWeek.getDisplayName(TextStyle.SHORT, PolishLocale).take(2).uppercase(),
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (selected) {
-                            MaterialTheme.colorScheme.onPrimary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
+                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        text = date.dayOfMonth.toString(),
+                        date.dayOfMonth.toString(),
                         style = MaterialTheme.typography.titleMedium,
                         color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                     )
@@ -294,167 +387,162 @@ private fun WeekStrip(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun TaskCard(
-    task: PlannerTask,
+private fun PlannerOccurrenceCard(
+    occurrence: PlannerOccurrence,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
+    val isTask = occurrence.item.type == PlannerItemType.Task
+    val opacity by animateFloatAsState(
+        targetValue = if (occurrence.isCompleted) 0.58f else 1f,
+        animationSpec = if (MaterialTheme.tiqoAnimationsEnabled) tween(180) else snap(),
+        label = "completion",
+    )
     GlassSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .alpha(opacity)
+            .combinedClickable(
+                onClick = {
+                    if (isTask) {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onClick()
+                    } else {
+                        onLongClick()
+                    }
+                },
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+            ),
         cornerRadius = 22.dp,
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(25.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (task.isCompleted) MaterialTheme.colorScheme.primary else Color.Transparent,
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            when (occurrence.item.type) {
+                PlannerItemType.Task -> CompletionCircle(occurrence.isCompleted)
+                PlannerItemType.Event -> Icon(Icons.Rounded.Event, null, tint = MaterialTheme.colorScheme.primary)
+                PlannerItemType.Birthday -> Icon(Icons.Rounded.Cake, null, tint = MaterialTheme.colorScheme.primary)
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    occurrence.item.time?.let {
+                        Text(
+                            it.format(DateTimeFormatter.ofPattern("HH:mm")),
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(
+                        occurrence.item.title,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium,
+                        textDecoration = if (occurrence.isCompleted) TextDecoration.LineThrough else null,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                    .border(
-                        width = 1.5.dp,
-                        color = if (task.isCompleted) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.outline
-                        },
-                        shape = CircleShape,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (task.isCompleted) {
-                    Icon(
-                        imageVector = Icons.Rounded.Check,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(17.dp),
+                }
+                if (occurrence.item.description.isNotBlank()) {
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        occurrence.item.description,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(14.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = task.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    textDecoration = if (task.isCompleted) TextDecoration.LineThrough else null,
-                    color = if (task.isCompleted) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val metadata = listOfNotNull(
-                    task.time?.format(DateTimeFormatter.ofPattern("HH:mm")),
-                    task.recurrence.shortLabel(),
-                ).joinToString("  ·  ")
-                if (metadata.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = metadata,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            if (occurrence.item.reminder != null) {
+                Icon(Icons.Rounded.Notifications, null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (occurrence.item.recurrence != RecurrenceRule.None) {
+                Spacer(Modifier.width(6.dp))
+                Icon(Icons.Rounded.Repeat, null, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
 }
 
 @Composable
-private fun EmptyDayCard() {
-    GlassSurface(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text("Spokojny dzień", style = MaterialTheme.typography.titleMedium)
+private fun CompletionCircle(completed: Boolean) {
+    Box(
+        modifier = Modifier
+            .size(26.dp)
+            .clip(CircleShape)
+            .background(if (completed) MaterialTheme.colorScheme.primary else Color.Transparent)
+            .border(1.5.dp, if (completed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (completed) Icon(Icons.Rounded.Check, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onPrimary)
+    }
+}
+
+@Composable
+private fun EmptyDayCard(onAdd: () -> Unit) {
+    GlassSurface(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.nothing_planned), style = MaterialTheme.typography.titleMedium)
             Text(
-                "Nie masz tu jeszcze żadnych tasków.",
-                style = MaterialTheme.typography.bodyMedium,
+                stringResource(R.string.nothing_planned_hint),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            TextButton(onClick = onAdd) { Text(stringResource(R.string.add_item)) }
         }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TaskDetailsSheet(
-    task: PlannerTask,
+private fun OccurrenceDetails(
+    occurrence: PlannerOccurrence,
     onDismiss: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-    ) {
+    val item = occurrence.item
+    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 24.dp, end = 24.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 30.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(task.title, style = MaterialTheme.typography.titleLarge)
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Zamknij")
-                }
-            }
-            if (task.description.isNotBlank()) {
-                Text(
-                    task.description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Rounded.Schedule,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(19.dp),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    listOfNotNull(
-                        task.time?.format(DateTimeFormatter.ofPattern("HH:mm")),
-                        task.recurrence.longLabel(),
-                    ).joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                Text(item.title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, stringResource(R.string.close)) }
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            if (item.description.isNotBlank()) {
+                Text(item.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(
+                occurrence.date.format(DateTimeFormatter.ofPattern("EEEE, d MMMM yyyy", PolishLocale)) +
+                    (item.time?.let { " · ${it.format(DateTimeFormatter.ofPattern("HH:mm"))}" } ?: ""),
+            )
+            if (item.reminder != null) {
+                DetailRow(Icons.Rounded.Notifications, stringResource(R.string.reminder))
+            }
+            if (item.recurrence != RecurrenceRule.None) {
+                DetailRow(Icons.Rounded.Repeat, stringResource(R.string.recurring))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(modifier = Modifier.weight(1f), onClick = onEdit) {
-                    Icon(Icons.Rounded.Edit, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Edytuj")
+                    Icon(Icons.Rounded.Edit, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.edit))
                 }
                 Button(
                     modifier = Modifier.weight(1f),
                     onClick = onDelete,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.14f),
-                        contentColor = MaterialTheme.colorScheme.error,
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
                     ),
                 ) {
-                    Icon(Icons.Rounded.DeleteOutline, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Usuń")
+                    Icon(Icons.Rounded.DeleteOutline, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.delete))
                 }
             }
         }
@@ -462,57 +550,10 @@ private fun TaskDetailsSheet(
 }
 
 @Composable
-private fun TaskEditorDialog(
-    task: PlannerTask?,
-    onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit,
-) {
-    var title by remember(task?.id) { mutableStateOf(task?.title.orEmpty()) }
-    var description by remember(task?.id) { mutableStateOf(task?.description.orEmpty()) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (task == null) "Nowy task" else "Edytuj task") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Nazwa") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text("Opis (opcjonalny)") },
-                    minLines = 3,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onSave(title, description) },
-                enabled = title.isNotBlank(),
-            ) {
-                Text("Zapisz")
-            }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Anuluj") } },
-    )
-}
-
-private fun RecurrenceRule.shortLabel(): String? = when (this) {
-    RecurrenceRule.Once -> null
-    is RecurrenceRule.Weekly -> "Cykliczny"
-    is RecurrenceRule.Yearly -> "Coroczny"
-}
-
-private fun RecurrenceRule.longLabel(): String = when (this) {
-    RecurrenceRule.Once -> "Jednorazowy"
-    is RecurrenceRule.Weekly -> days
-        .sortedBy { it.value }
-        .joinToString(prefix = "Co tydzień: ", separator = ", ") {
-            it.getDisplayName(TextStyle.SHORT, PolishLocale)
-        }
-    is RecurrenceRule.Yearly -> "Co roku: ${day.dayOfMonth}.${day.monthValue}"
+private fun DetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.width(8.dp))
+        Text(label)
+    }
 }

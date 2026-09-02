@@ -9,4 +9,7 @@ captures/
 .cxx/
 *.jks
 *.keystore
-
+*.litertlm
+*.gguf
+*.partial
+models/
