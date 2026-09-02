@@ -2,67 +2,64 @@
 
 ## Zasady
 
-1. UI nie zna Room, DataStore ani LiteRT-LM.
-2. Warstwa danych implementuje kontrakty z `domain`.
-3. Modele runtime'u AI nie przeciekają do feature'ów.
-4. Operacje modelu AI są traktowane jak nieufne wejście i zawsze walidowane.
-5. Każda faza pozostawia projekt w stanie kompilowalnym.
+1. Room jest jedynym źródłem prawdy dla danych planera.
+2. UI nie zna DAO, DataStore ani typów LiteRT-LM.
+3. Warstwa danych implementuje kontrakty z `domain`.
+4. Model AI nigdy nie otrzymuje SQL ani DAO; tool calls przechodzą przez walidację i repozytorium.
+5. Planner działa bez modelu, sieci i aktywnego procesu UI.
 
 ## Przepływ zależności
 
 ```text
 Compose screen
       ↓
-ViewModel / UI state
+ViewModel + immutable UI state + Flow
       ↓
-domain contracts + models
+domain models / repository contracts
       ↑
-data implementations (in-memory → Room)
+Room repositories ← Room database
 
-Chat / planner feature
-      ↓
-AI orchestration + validation
-      ↓
-LlmEngine
-      ↑
-LiteRT-LM engines (small planner / optional chat model)
+LLM output → PlannerTools → validation → PlannerRepository
+Chat UI → LlmEngine ← LiteRtLlmEngine
 ```
 
-## Aktualne granice
+## Pakiety
 
-### `core/designsystem`
+- `core/designsystem` — centralny Material theme, semantyczne kolory i lekkie glass surfaces.
+- `domain/model` — `PlannerItem`, recurrence, occurrence, statystyki i modele czatu bez zależności od Android UI.
+- `domain/recurrence` — deterministyczne obliczanie wystąpień bez materializowania przyszłości.
+- `data/database` — Room encje i DAO; completion ma klucz `(itemId, occurrenceDate)`.
+- `data/repository` — mapowanie encji i implementacje wspólnych repozytoriów Home/Calendar/Statistics/Chat.
+- `data/settings` — DataStore Preferences i trwałe ustawienia UI/planera.
+- `notification` — alarmy, receivers, kanał, akcja completion oraz rescheduling.
+- `feature/*` — Compose screens, routes, ViewModels i UI state.
+- `ai` — kontrakt `LlmEngine`, adapter LiteRT-LM, manifest modeli oraz bezpieczna warstwa narzędzi.
 
-Kolory, typografia i wspólne komponenty. `GlassSurface` symuluje szkło transparentną powierzchnią, obramowaniem i cieniem. Rozmycie jest używane dla dużych, statycznych dekoracji tła, nie dla każdego elementu przewijanej listy.
+## Baza danych
 
-### `domain`
+Schema v1 zawiera:
 
-Modele niezależne od Android SDK: `PlannerTask`, `RecurrenceRule` oraz `TaskRepository`. Room dostanie osobne encje i mappery; encje bazy nie staną się modelami UI.
+- `planner_items` — jedna definicja taska/serii,
+- `occurrence_completions` — tylko rzeczywiście zakończone wystąpienia,
+- `chat_conversations`,
+- `chat_messages`.
 
-### `data`
+Nie istnieje tabela z wygenerowanymi przyszłymi wystąpieniami. `RecurrenceEngine` oblicza wystąpienia tylko dla zakresu żądanego przez ekran lub statystyki. Usunięcie definicji serii kaskadowo usuwa jej completion records.
 
-Obecnie zawiera `InMemoryTaskRepository`. W fazie trwałych danych implementacja zostanie zastąpiona repozytorium opartym o Room, bez zmiany kontraktu używanego przez ekran Home.
+To pierwsza wersja Room projektu; poprzedni skeleton przechowywał dane wyłącznie w pamięci, dlatego nie ma źródłowej bazy do migracji. Kolejna zmiana schematu musi dodać jawną `Migration`; aplikacja nie używa `fallbackToDestructiveMigration`.
 
-W bazie completion nie powinno być pojedynczym polem na tasku cyklicznym. Potrzebny będzie rekord wykonania identyfikowany taskiem i datą wystąpienia, dzięki czemu historia pozostanie poprawna.
+## Przypomnienia
 
-### `feature`
+`RoomPlannerRepository` po zapisie anuluje stary alarm i planuje najbliższe poprawne wystąpienie. Exact alarm jest używany wyłącznie, kiedy pozwala na to system; w przeciwnym razie scheduler zachowuje funkcję przez alarm niedokładny. Receivery odbudowują plan po restarcie urządzenia, zmianie czasu i strefy.
 
-Każdy feature posiada ekran/route, ViewModel i UI state. Nawigacja przekazuje tylko stabilne identyfikatory. Home jest pierwszym pionowym wycinkiem; Calendar i Chat są świadomie placeholderami.
+## AI
 
-### `ai`
+`LlmEngine` udostępnia load/unload, streaming, stop oraz obserwowalny stan. `LiteRtLlmEngine` jest pierwszym backendem, ale feature czatu zależy wyłącznie od interfejsu.
 
-`LlmEngine` jest wąską granicą dla silników lokalnych. Planowana warstwa orkiestracji wybierze engine według wymaganej capability:
+`ModelManager` przechowuje manifest poza UI i importuje pliki do prywatnego `files/models`. Nie ma automatycznego pobierania gated modeli ani tokenów w APK.
 
-- mały model: klasyfikacja intencji i tool calls planera,
-- większy model: opcjonalny chat i trudniejsze przekształcenia,
-- brak właściwego modelu: czytelny błąd lub deterministyczny fallback.
+`PlannerTools` waliduje typowane wywołania, daty i potwierdzenia operacji destrukcyjnych. Nie jest jeszcze połączony z parserem odpowiedzi konkretnego fine-tune; obecny czat generuje zwykły tekst. Dzięki temu nie przedstawiamy niesprawdzonego tool callingu jako gotowej funkcji.
 
-Wynik modelu nie może bezpośrednio modyfikować bazy. Najpierw przechodzi parsowanie, walidację schematu, reguły domenowe i — przy operacjach destrukcyjnych lub zbiorczych — potwierdzenie użytkownika.
+## Composition root
 
-## Dlaczego jeden moduł Gradle na początku
-
-Projekt ma obecnie niewielki zespół i krótki czas kompilacji. Pakiety dają wystarczające granice bez kosztu wielu modułów. Kandydaci do późniejszego wydzielenia to `core:designsystem`, `core:database`, `core:ai` oraz niezależne feature'y. Wydzielenie nastąpi, gdy pojawi się co najmniej jeden konkretny powód: równoległa praca, niekontrolowane zależności albo zauważalna poprawa czasu buildów.
-
-## Wstrzykiwanie zależności
-
-Pierwszy skeleton używa prostych konstruktorów i domyślnych implementacji. Przed Room zostanie dodany mały composition root. Framework DI zostanie wybrany dopiero wtedy, gdy graf zależności uzasadni jego koszt; architektura nie wymaga Hilt do zachowania testowalności.
-
+`AppContainer` tworzy pojedynczą bazę, repozytoria, settings, scheduler, engine i model manager. Proste wstrzykiwanie przez konstruktory utrzymuje testowalność bez dodawania Hilt do niewielkiego, jednomodułowego projektu.
