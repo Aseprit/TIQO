@@ -1,5 +1,7 @@
 # PlannerGemma
 
+> **Status: experimental / paused.** Custom SFT, długie benchmarki FunctionGemma i konwersja Android nie są obecnie uruchamiane. Cały dataset, pipeline, wyniki i dokumentacja pozostają zachowane. Aktywny eksperyment zerowego fine-tuningu dla Qwen3-0.6B znajduje się w [../benchmark/README.md](../benchmark/README.md).
+
 This directory contains the reproducible, UI-independent pipeline for Tiqo's Polish local planner model.
 
 ## What is here

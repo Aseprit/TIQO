@@ -77,6 +77,16 @@ Status fazy 3, 2026-09-02. Każdy etap kończy się działającym plannerem i ko
 
 ## Faza 3 — lokalny agent
 
+### ACTIVE — pivot Qwen3-0.6B (bez fine-tuningu)
+
+- [x] zabezpieczyć zastany WIP PlannerGemma bez usuwania datasetu, treningu, ewaluacji i eksperymentów,
+- [x] wstrzymać custom SFT PlannerGemma 270M oraz długie benchmarki FunctionGemma,
+- [x] dodać ręcznie kontrolowany polski gold benchmark 280 przypadków z deterministycznym kontekstem,
+- [x] dodać lokalny runner Qwen3-0.6B non-thinking z metrykami, failure report i resume,
+- [x] dodać launchery Windows dla smoke i pełnego runu,
+- [ ] uruchomić lokalnie pełny benchmark Qwen3-0.6B i przeanalizować zapisane failures,
+- [ ] dopiero po wyniku podjąć decyzję: zero-shot Qwen, fine-tuning czy powrót do PlannerGemma.
+
 ### DONE — benchmark i pipeline
 
 - [x] niezależny katalog `ai/plannergemma` z generatorem, walidatorem, treningiem, ewaluacją i konwersją,
@@ -84,7 +94,7 @@ Status fazy 3, 2026-09-02. Każdy etap kończy się działającym plannerem i ko
 - [x] programowa walidacja schematu, dat, czasu, recurrence, duplikatów i rozdzielenia rodzin template,
 - [x] metryki ogólne, per kategoria/styl, confusion matrix, malformed i false-positive mutation,
 - [x] powtarzalny SFT z manifestem ustawień oraz dynamic-int8 `.litertlm` conversion entry point,
-- [ ] zakończyć wersjonowany benchmark kandydatów i wybrać/fine-tune'ować checkpoint spełniający próg jakości,
+- [ ] zakończyć wersjonowany benchmark kandydatów i wybrać checkpoint spełniający próg jakości,
 - [ ] przekonwertować finalne wagi na Linux/Colab i zweryfikować `.litertlm` na fizycznym Androidzie.
 
 ### DONE — Android agent i modele

@@ -18,6 +18,7 @@ ai/plannergemma/.cache/
 ai/plannergemma/models/
 ai/plannergemma/checkpoints/
 ai/plannergemma/results/local/
+ai/benchmark/results/
 /work/
 __pycache__/
 *.pyc

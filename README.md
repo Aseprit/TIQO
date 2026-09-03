@@ -59,7 +59,7 @@ Tiqo prosi o zgodę na powiadomienia na Androidzie 13+. Gdy system zezwala na do
 
 Modele nie są dołączone do repozytorium. Gated PlannerGemma korzysta z legalnego ręcznego importu po zaakceptowaniu warunków; token Hugging Face nigdy nie trafia do APK. Publiczny Qwen 2.5 1.5B Chat może być pobrany bezpośrednio z Hugging Face, z kontrolą miejsca, dokładnego rozmiaru i SHA-256. Wszystko poza pobieraniem działa lokalnie.
 
-Do działania poleceń AI potrzebny jest zgodny, wytrenowany i przekonwertowany plik PlannerGemma `.litertlm`; licencja Gemma uniemożliwia dołączenie go bezpośrednio do repozytorium. Kod wykonawczy nie ma mock fallbacku. Pipeline, aktualny stan benchmarku i instrukcje deploymentu: [ai/plannergemma/README.md](ai/plannergemma/README.md).
+Do działania poleceń AI w obecnym buildzie Android nadal potrzebny jest zgodny i przekonwertowany plik `.litertlm`; kod wykonawczy nie ma mock fallbacku. Custom SFT PlannerGemma jest zachowany, ale wstrzymany jako eksperyment. Aktualny pivot sprawdza publiczny Qwen3-0.6B jako planner/router bez fine-tuningu: [ai/benchmark/README.md](ai/benchmark/README.md). Integracja Android nastąpi dopiero po wyniku tego benchmarku.
 
 ## Architektura
 
