@@ -20,6 +20,8 @@ interface PlannerRepository {
 
     suspend fun save(item: PlannerItem): Long
 
+    suspend fun restore(item: PlannerItem): Long
+
     suspend fun delete(itemId: Long)
 
     suspend fun setCompleted(itemId: Long, occurrenceDate: LocalDate, completed: Boolean)
@@ -28,4 +30,3 @@ interface PlannerRepository {
 
     suspend fun rescheduleAllReminders()
 }
-

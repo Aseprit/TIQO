@@ -4,8 +4,14 @@ import android.content.Context
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Conversation
+import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.OpenApiTool
+import com.google.ai.edge.litertlm.tool
+import com.google.gson.Gson
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -50,15 +56,53 @@ class LiteRtLlmEngine(private val context: Context) : LlmEngine {
             emit(LlmEvent.Failure("Local model is not loaded", recoverable = true))
             return@flow
         }
-        val prompt = request.messages.lastOrNull { it.role == LlmRole.User }?.content
+        val lastUserIndex = request.messages.indexOfLast { it.role == LlmRole.User }
+        val prompt = request.messages.getOrNull(lastUserIndex)?.content
         if (prompt.isNullOrBlank()) {
             emit(LlmEvent.Failure("Prompt is empty", recoverable = true))
             return@flow
         }
         try {
-            val conversation = currentEngine.createConversation()
+            val systemInstruction = request.messages
+                .filter { it.role == LlmRole.System }
+                .joinToString("\n") { it.content }
+                .takeIf(String::isNotBlank)
+                ?.let(Contents::of)
+            val history = request.messages.take(lastUserIndex)
+                .filter { it.role != LlmRole.System }
+                .map { message ->
+                    when (message.role) {
+                        LlmRole.User -> Message.user(message.content)
+                        LlmRole.Assistant -> Message.model(message.content)
+                        LlmRole.System -> error("System messages are handled separately")
+                    }
+                }
+            val providers = request.availableTools.map { definition ->
+                tool(object : OpenApiTool {
+                    override fun getToolDescriptionJsonString(): String =
+                        """{"name":${Gson().toJson(definition.name)},"description":${Gson().toJson(definition.description)},"parameters":${definition.inputSchema}}"""
+
+                    override fun execute(argumentsJson: String): String =
+                        error("Tiqo uses manual tool execution")
+                })
+            }
+            val conversation = currentEngine.createConversation(
+                ConversationConfig(
+                    systemInstruction = systemInstruction,
+                    initialMessages = history,
+                    tools = providers,
+                    automaticToolCalling = false,
+                    maxOutputToken = 256,
+                ),
+            )
             activeConversation = conversation
-            conversation.sendMessageAsync(prompt).collect { message ->
+            val emittedCalls = mutableSetOf<String>()
+            conversation.sendMessageAsync(Message.user(prompt)).collect { message ->
+                message.toolCalls.forEach { call ->
+                    val arguments = Gson().toJson(call.arguments)
+                    val key = "${call.name}:$arguments"
+                    if (emittedCalls.add(key)) emit(LlmEvent.ToolCall(call.name, arguments))
+                }
                 val text = message.contents.contents
                     .filterIsInstance<Content.Text>()
                     .joinToString(separator = "") { it.text }
@@ -74,8 +118,8 @@ class LiteRtLlmEngine(private val context: Context) : LlmEngine {
     }.flowOn(Dispatchers.Default)
 
     override suspend fun stopGeneration() = withContext(Dispatchers.IO) {
-        runCatching { activeConversation?.close() }
-        activeConversation = null
+        runCatching { activeConversation?.cancelProcess() }
+        Unit
     }
 
     override suspend fun unload() = withContext(Dispatchers.IO) {

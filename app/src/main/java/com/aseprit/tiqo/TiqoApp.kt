@@ -113,7 +113,12 @@ fun TiqoApp(
                     }
                     composable(MainDestination.Chat.route) {
                         val vm: ChatViewModel = viewModel(
-                            factory = ChatViewModel.Factory(container.chatRepository, container.llmEngine),
+                            factory = ChatViewModel.Factory(
+                                container.chatRepository,
+                                container.plannerAgent,
+                                container.plannerEngine,
+                                container.chatEngine,
+                            ),
                         )
                         ChatRoute(vm, onOpenModels = { navController.navigate(Route.Models) })
                     }

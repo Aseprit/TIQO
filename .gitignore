@@ -13,3 +13,11 @@ captures/
 *.gguf
 *.partial
 models/
+.venv*/
+ai/plannergemma/.cache/
+ai/plannergemma/models/
+ai/plannergemma/checkpoints/
+ai/plannergemma/results/local/
+/work/
+__pycache__/
+*.pyc

@@ -40,7 +40,13 @@ class RoomChatRepository(private val dao: ChatDao) : ChatRepository {
             }
         }
 
-    override suspend fun addMessage(conversationId: Long, role: ChatRole, content: String): Long {
+    override suspend fun addMessage(
+        conversationId: Long,
+        role: ChatRole,
+        content: String,
+        toolName: String?,
+        toolPayload: String?,
+    ): Long {
         val now = System.currentTimeMillis()
         val id = dao.insertMessage(
             ChatMessageEntity(
@@ -48,6 +54,8 @@ class RoomChatRepository(private val dao: ChatDao) : ChatRepository {
                 role = role.name,
                 content = content,
                 createdAtMillis = now,
+                toolName = toolName,
+                toolPayload = toolPayload,
             ),
         )
         dao.touchConversation(conversationId, now)
@@ -58,4 +66,3 @@ class RoomChatRepository(private val dao: ChatDao) : ChatRepository {
         dao.updateMessageContent(messageId, content)
     }
 }
-

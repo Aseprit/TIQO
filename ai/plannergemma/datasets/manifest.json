@@ -1,0 +1,29 @@
+{
+  "version": "planner-pl-v1",
+  "seed": 20260902,
+  "sizes": {
+    "train": 10000,
+    "validation": 1000,
+    "test": 720
+  },
+  "styles": [
+    "correct",
+    "colloquial",
+    "no_diacritics",
+    "typo",
+    "stt"
+  ],
+  "category_weights": {
+    "create": 20,
+    "update": 15,
+    "list": 12,
+    "search": 10,
+    "complete": 10,
+    "delete": 8,
+    "recurrence": 10,
+    "statistics": 5,
+    "delegate": 7,
+    "clarification": 3
+  },
+  "test_template_family": "holdout"
+}

@@ -91,6 +91,14 @@ class RoomPlannerRepository(
         return id
     }
 
+    override suspend fun restore(item: PlannerItem): Long {
+        require(item.id != 0L) { "Only a persisted item can be restored" }
+        val id = dao.insert(item.toEntity())
+        reminderScheduler.cancel(id)
+        reminderScheduler.schedule(item.copy(id = id))
+        return id
+    }
+
     override suspend fun delete(itemId: Long) {
         reminderScheduler.cancel(itemId)
         dao.delete(itemId)
@@ -110,4 +118,3 @@ class RoomPlannerRepository(
         }
     }
 }
-

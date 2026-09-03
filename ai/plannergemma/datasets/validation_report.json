@@ -1,0 +1,30 @@
+{
+  "valid": true,
+  "total": 11720,
+  "categories": {
+    "clarification": 351,
+    "complete": 1170,
+    "create": 2360,
+    "delegate": 819,
+    "delete": 936,
+    "list": 1404,
+    "recurrence": 1170,
+    "search": 1170,
+    "statistics": 585,
+    "update": 1755
+  },
+  "styles": {
+    "colloquial": 2344,
+    "correct": 2344,
+    "no_diacritics": 2344,
+    "stt": 2344,
+    "typo": 2344
+  },
+  "recurrence_frequencies": {
+    "DAILY": 234,
+    "MONTHLY": 234,
+    "WEEKLY": 468,
+    "YEARLY": 234
+  },
+  "errors": []
+}

@@ -1,0 +1,4 @@
+# The official Google conversion recipe currently uses nightly AI Edge packages.
+# Install this file in a separate Linux/Colab environment after training.
+ai-edge-torch-nightly
+ai-edge-litert-nightly

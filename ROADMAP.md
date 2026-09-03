@@ -1,6 +1,6 @@
 # Tiqo — roadmap
 
-Status po fazie 2, 2026-09-02. Każdy etap kończy się działającym plannerem i kompilowalnym APK.
+Status fazy 3, 2026-09-02. Każdy etap kończy się działającym plannerem i kompilowalnym APK.
 
 ## Audyt wejściowy fazy 2
 
@@ -75,14 +75,33 @@ Status po fazie 2, 2026-09-02. Każdy etap kończy się działającym plannerem 
 - [x] modele, tokeny, keystore'y i pliki lokalne wykluczone z Git,
 - [x] debug APK budowany przez Gradle.
 
-## TODO — następny etap
+## Faza 3 — lokalny agent
 
-- [ ] podłączyć parser tool calls LiteRT-LM do `PlannerTools` i pokazać rezultaty/Undo jako natywne karty,
-- [ ] dodać obsługę `update_item`, `get_item`, `search_items` i bulk confirmation,
-- [ ] przygotować i zmierzyć właściwy polski fine-tune PlannerGemma 270M poza repozytorium Android,
-- [ ] dostroić pięciominutowy timeout lifecycle na podstawie pomiarów RAM/temperatury na docelowym urządzeniu,
-- [ ] obsłużyć więcej niż jeden engine/model równocześnie i routing planner → chat,
-- [ ] legalny download manager z checksumą i progressem, jeżeli źródło/licencja pozwoli; obecnie tylko ręczny import,
+### DONE — benchmark i pipeline
+
+- [x] niezależny katalog `ai/plannergemma` z generatorem, walidatorem, treningiem, ewaluacją i konwersją,
+- [x] `planner-pl-v1`: 10 000 train, 1 000 validation, 720 holdout test; pięć równych stylów polskiego,
+- [x] programowa walidacja schematu, dat, czasu, recurrence, duplikatów i rozdzielenia rodzin template,
+- [x] metryki ogólne, per kategoria/styl, confusion matrix, malformed i false-positive mutation,
+- [x] powtarzalny SFT z manifestem ustawień oraz dynamic-int8 `.litertlm` conversion entry point,
+- [ ] zakończyć wersjonowany benchmark kandydatów i wybrać/fine-tune'ować checkpoint spełniający próg jakości,
+- [ ] przekonwertować finalne wagi na Linux/Colab i zweryfikować `.litertlm` na fizycznym Androidzie.
+
+### DONE — Android agent i modele
+
+- [x] manualne LiteRT-LM tool calling (`automaticToolCalling = false`) i prawdziwe `cancelProcess()`,
+- [x] 10 narzędzi, parser allow-list, walidacja, kontekst lokalny i blokada hallucinated item IDs,
+- [x] wykonanie przez wspólny `PlannerRepository`/Room z synchronizacją Home, Calendar i reminderów,
+- [x] structured results oraz Undo dla create, update, delete i complete/reopen,
+- [x] osobne silniki planner/chat, routing `delegate_to_chat` i brak improwizacji małego modelu,
+- [x] oddzielne rekordy user/assistant/tool call/tool result w historii Room,
+- [x] statusy AI, prawdziwe Stop i model lifecycle: warm foreground, timeout per rola, memory pressure,
+- [x] legalny import gated PlannerGemma i prawdziwe pobieranie publicznego chat modelu z progressem, cancel, rozmiarem i SHA-256,
+- [x] test end-to-end fake inference → parser → repository → reminder fields → Undo.
+
+## TODO — po fazie 3
+
+- [ ] testy wydajności i pełny offline scenario na docelowym telefonie po dostarczeniu finalnego `.litertlm`,
 - [ ] testy instrumentacyjne Room/migracji, gdy powstanie schema v2; v1 jest pierwszą bazą i nie ma poprzedniej bazy Room do migracji,
 - [ ] testy UI/accessibility na fizycznych urządzeniach i benchmark dużego zbioru danych,
 - [ ] export/import danych oraz wybór własnego koloru akcentu,

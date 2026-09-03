@@ -27,6 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +55,7 @@ fun ChatRoute(viewModel: ChatViewModel, onOpenModels: () -> Unit) {
         state = state,
         onSend = { viewModel.send(it, unavailable) },
         onStop = viewModel::stop,
+        onUndo = viewModel::undo,
         onOpenModels = onOpenModels,
     )
 }
@@ -63,6 +65,7 @@ private fun ChatScreen(
     state: ChatUiState,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
+    onUndo: (Long) -> Unit,
     onOpenModels: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") }
@@ -85,8 +88,8 @@ private fun ChatScreen(
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.chat_title), style = MaterialTheme.typography.titleLarge)
                 Text(
-                    if (state.modelLoaded) "AI Ready" else stringResource(R.string.ai_not_installed),
-                    color = if (state.modelLoaded) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    statusLabel(state.status),
+                    color = if (state.status == ChatAiStatus.Ready) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
@@ -121,7 +124,13 @@ private fun ChatScreen(
                 contentPadding = PaddingValues(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(state.messages, key = { it.id }) { MessageBubble(it) }
+                items(state.messages, key = { it.id }) { message ->
+                    MessageBubble(
+                        message = message,
+                        canUndo = message.id in state.undoTokens,
+                        onUndo = { onUndo(message.id) },
+                    )
+                }
             }
         }
         Row(
@@ -158,16 +167,15 @@ private fun ChatScreen(
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage) {
+private fun MessageBubble(message: ChatMessage, canUndo: Boolean, onUndo: () -> Unit) {
     val isUser = message.role == ChatRole.User
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
-        Text(
-            message.content,
+        Column(
             modifier = Modifier
-                .fillMaxWidth(0.84f)
+                .fillMaxWidth(if (message.role == ChatRole.Tool) 0.72f else 0.84f)
                 .clip(
                     RoundedCornerShape(
                         topStart = 22.dp,
@@ -177,11 +185,31 @@ private fun MessageBubble(message: ChatMessage) {
                     ),
                 )
                 .background(
-                    if (isUser) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.surfaceVariant,
+                    when (message.role) {
+                        ChatRole.User -> MaterialTheme.colorScheme.primary
+                        ChatRole.Tool -> MaterialTheme.colorScheme.surface.copy(alpha = 0.58f)
+                        ChatRole.Assistant -> MaterialTheme.colorScheme.surfaceVariant
+                    },
                 )
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-            color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        ) {
+            Text(
+                message.content,
+                color = if (isUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                style = if (message.role == ChatRole.Tool) MaterialTheme.typography.labelMedium else MaterialTheme.typography.bodyLarge,
+            )
+            if (canUndo) {
+                TextButton(onClick = onUndo) { Text("COFNIJ") }
+            }
+        }
     }
+}
+
+private fun statusLabel(status: ChatAiStatus): String = when (status) {
+    ChatAiStatus.Unavailable -> "AI niedostępne"
+    ChatAiStatus.Ready -> "AI gotowe"
+    ChatAiStatus.Thinking -> "Interpretuję…"
+    ChatAiStatus.Executing -> "Wykonuję…"
+    ChatAiStatus.Generating -> "Generuję…"
+    ChatAiStatus.Error -> "Błąd AI"
 }

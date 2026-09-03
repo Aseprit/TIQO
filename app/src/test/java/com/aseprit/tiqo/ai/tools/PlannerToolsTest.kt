@@ -32,7 +32,7 @@ class PlannerToolsTest {
             context,
         )
 
-        assertTrue(result is PlannerToolResult.Created)
+        assertTrue(result is PlannerToolResult.Success)
         assertEquals("Dentysta", repository.items.single().title)
         assertEquals(LocalTime.of(10, 0), repository.items.single().time)
     }
@@ -51,16 +51,56 @@ class PlannerToolsTest {
 
     @Test fun unrelatedRequestDelegatesInsteadOfInventingPlannerAnswer() = runBlocking {
         val result = PlannerTools(FakeToolRepository()).execute(
-            PlannerToolCall.DelegateToChat,
+            PlannerToolCall.DelegateToChat("dlaczego niebo jest niebieskie"),
             context,
         )
 
-        assertEquals(PlannerToolResult.ChatModelRequired, result)
+        assertEquals(
+            PlannerToolResult.ChatModelRequired("dlaczego niebo jest niebieskie"),
+            result,
+        )
+    }
+
+    @Test fun updateAndUndoRestorePreviousItem() = runBlocking {
+        val repository = FakeToolRepository()
+        repository.save(PlannerItem(title = "Dentysta", startDate = context.currentDate.plusDays(1), time = LocalTime.of(10, 0)))
+        val tools = PlannerTools(repository)
+
+        val changed = tools.execute(PlannerToolCall.UpdateItem(1, timeIso = "11:00"), context) as PlannerToolResult.Success
+        assertEquals(LocalTime.of(11, 0), repository.items.single().time)
+
+        tools.undo(changed.card.undoToken!!)
+        assertEquals(LocalTime.of(10, 0), repository.items.single().time)
+    }
+
+    @Test fun deleteAndUndoRestoreStableId() = runBlocking {
+        val repository = FakeToolRepository()
+        repository.save(PlannerItem(title = "Trening", startDate = context.currentDate))
+        val tools = PlannerTools(repository)
+
+        val deleted = tools.execute(PlannerToolCall.DeleteItem(1, confirmed = true), context) as PlannerToolResult.Success
+        assertTrue(repository.items.isEmpty())
+
+        tools.undo(deleted.card.undoToken!!)
+        assertEquals(1L, repository.items.single().id)
+    }
+
+    @Test fun completionAndUndoRestorePreviousOccurrenceState() = runBlocking {
+        val repository = FakeToolRepository()
+        repository.save(PlannerItem(title = "Pranie", startDate = context.currentDate))
+        val tools = PlannerTools(repository)
+
+        val completed = tools.execute(PlannerToolCall.SetCompleted(1, context.currentDate.toString(), true), context) as PlannerToolResult.Success
+        assertTrue(repository.isCompleted(1, context.currentDate))
+
+        tools.undo(completed.card.undoToken!!)
+        assertTrue(!repository.isCompleted(1, context.currentDate))
     }
 }
 
 private class FakeToolRepository : PlannerRepository {
     val items = mutableListOf<PlannerItem>()
+    private val completions = mutableSetOf<Pair<Long, LocalDate>>()
     private var nextId = 1L
 
     override fun observeOccurrences(date: LocalDate): Flow<List<PlannerOccurrence>> =
@@ -86,11 +126,20 @@ private class FakeToolRepository : PlannerRepository {
         return id
     }
 
+    override suspend fun restore(item: PlannerItem): Long {
+        items.removeAll { it.id == item.id }
+        items += item
+        return item.id
+    }
+
     override suspend fun delete(itemId: Long) {
         items.removeAll { it.id == itemId }
     }
 
-    override suspend fun setCompleted(itemId: Long, occurrenceDate: LocalDate, completed: Boolean) = Unit
-    override suspend fun isCompleted(itemId: Long, occurrenceDate: LocalDate): Boolean = false
+    override suspend fun setCompleted(itemId: Long, occurrenceDate: LocalDate, completed: Boolean) {
+        if (completed) completions += itemId to occurrenceDate else completions -= itemId to occurrenceDate
+    }
+    override suspend fun isCompleted(itemId: Long, occurrenceDate: LocalDate): Boolean =
+        itemId to occurrenceDate in completions
     override suspend fun rescheduleAllReminders() = Unit
 }

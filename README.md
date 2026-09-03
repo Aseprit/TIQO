@@ -2,7 +2,7 @@
 
 Tiqo to lokalny, natywny planner na Androida z polskim interfejsem, spokojnym glassmorphism UI i opcjonalną warstwą lokalnego AI. Planner działa w pełni bez modelu i bez połączenia z siecią.
 
-## Stan projektu — 0.2.0
+## Stan projektu — 0.3.0
 
 W aplikacji działają:
 
@@ -17,8 +17,11 @@ W aplikacji działają:
 - statystyki tygodniowe liczone wyłącznie z tasków,
 - dark/light/system theme, siedem kolorów akcentu i intensywność szkła,
 - lokalne powiadomienia z akcją „Gotowe”, obsługa restartu, czasu i strefy czasowej,
-- trwała historia czatu, streaming i rzeczywiste zatrzymanie generowania,
-- adapter LiteRT-LM oraz menedżer ręcznie importowanych modeli.
+- trwała historia czatu i oddzielne rekordy lokalnych tool calls/results,
+- manualny agent LiteRT-LM: 10 walidowanych narzędzi → Room → reminder → structured result → Undo,
+- osobne lokalne modele planner/chat, routing, streaming i rzeczywiste zatrzymanie generowania,
+- Model Manager z importem gated PlannerGemma oraz pobieraniem publicznego modelu czatu, progressem, anulowaniem i SHA-256,
+- polski benchmark `planner-pl-v1`, powtarzalny SFT i pipeline konwersji `.litertlm`.
 
 ## Uruchomienie
 
@@ -52,11 +55,11 @@ Tiqo prosi o zgodę na powiadomienia na Androidzie 13+. Gdy system zezwala na do
 
 ## Lokalne AI
 
-`LlmEngine` oddziela Compose, dane planera i konkretny runtime. Pierwsza implementacja korzysta z LiteRT-LM i obsługuje ładowanie, streaming, anulowanie oraz zwalnianie modelu. Załadowany model pozostaje ciepły między promptami i jest zwalniany po pięciu minutach aplikacji w tle.
+`LlmEngine` oddziela Compose, dane planera i konkretny runtime. Implementacja LiteRT-LM korzysta z manualnego tool callingu: runtime nigdy nie wykonuje funkcji sam. Tiqo odczytuje call, waliduje allow-listę i argumenty, blokuje nieznane identyfikatory, a dopiero potem używa wspólnego repozytorium Room. Planner pozostaje ciepły przez pięć minut tła, większy chat przez minutę; oba są zwalniane pod presją pamięci.
 
-Modele nie są dołączone do repozytorium i nie są pobierane z gated repozytoriów. Menedżer modeli używa Androidowego selektora plików i kopiuje zgodny plik `.litertlm` do prywatnego katalogu aplikacji `files/models/`. Użytkownik odpowiada za licencję i zgodność importowanego pliku. Tokeny Hugging Face nigdy nie trafiają do APK.
+Modele nie są dołączone do repozytorium. Gated PlannerGemma korzysta z legalnego ręcznego importu po zaakceptowaniu warunków; token Hugging Face nigdy nie trafia do APK. Publiczny Qwen 2.5 1.5B Chat może być pobrany bezpośrednio z Hugging Face, z kontrolą miejsca, dokładnego rozmiaru i SHA-256. Wszystko poza pobieraniem działa lokalnie.
 
-Obecne ograniczenie: warstwa `PlannerTools` i walidator polskich dat względnych są gotowe do integracji, ale odpowiedzi modelu nie są jeszcze automatycznie mapowane na tool calls. Do działania czatu potrzebny jest zgodny, ręcznie zaimportowany model LiteRT-LM. FunctionGemma/PlannerGemma nie jest dołączona ani automatycznie pobierana.
+Do działania poleceń AI potrzebny jest zgodny, wytrenowany i przekonwertowany plik PlannerGemma `.litertlm`; licencja Gemma uniemożliwia dołączenie go bezpośrednio do repozytorium. Kod wykonawczy nie ma mock fallbacku. Pipeline, aktualny stan benchmarku i instrukcje deploymentu: [ai/plannergemma/README.md](ai/plannergemma/README.md).
 
 ## Architektura
 
@@ -65,10 +68,11 @@ Compose → ViewModel/Flow → domain contracts → Room/DataStore
                            ↑
 PlannerTools → validation ┘
 
-Chat UI → LlmEngine → LiteRT-LM
+Chat UI → PlannerGemma → ToolCall → Validator → PlannerTools → Room
+                    └→ delegate_to_chat → opcjonalny lokalny Chat LLM
 ```
 
-Projekt pozostaje jednym modułem Gradle, ale pakiety oddzielają `feature`, `domain`, `data`, `notification`, `core/designsystem` i `ai`. Room jest jednym źródłem prawdy dla Home, Calendar, Statistics, reminders i przyszłych tool calls. Szczegóły: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Projekt pozostaje jednym modułem Gradle, ale pakiety oddzielają `feature`, `domain`, `data`, `notification`, `core/designsystem` i `ai`. Room jest jednym źródłem prawdy dla Home, Calendar, Statistics, reminders i tool calls. Szczegóły: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) i [docs/AI_ARCHITECTURE.md](docs/AI_ARCHITECTURE.md).
 
 ## Prywatność i repozytorium
 
