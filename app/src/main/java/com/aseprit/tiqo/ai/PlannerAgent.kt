@@ -37,7 +37,7 @@ class PlannerAgent(
         onStatus: (AiAgentStatus) -> Unit = {},
         onToolCall: suspend (String, String) -> Unit = { _, _ -> },
     ): PlannerToolResult {
-        if (!engine.isLoaded.value) return PlannerToolResult.ValidationError("PlannerGemma nie jest załadowana")
+        if (!engine.isLoaded.value) return PlannerToolResult.ValidationError("Model Planner AI nie jest załadowany")
         val baseContext = PlannerToolContext.from(clock, locale)
         val candidates = resolveCandidates(command, baseContext.currentDate)
         val context = baseContext.copy(
@@ -133,7 +133,7 @@ class PlannerAgent(
             Locale: ${context.locale.toLanguageTag()}
             Selected date: ${context.selectedDate}
             Candidate planner items: ${Gson().toJson(candidatePayload)}
-            You are PlannerGemma, the Tiqo planner router. Use exactly one provided function.
+            You are the active Tiqo planner router. Use exactly one provided function.
             Never answer general questions yourself. Ask for clarification instead of guessing a target.
         """.trimIndent()
     }

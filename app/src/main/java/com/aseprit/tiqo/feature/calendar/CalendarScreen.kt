@@ -1,6 +1,7 @@
 package com.aseprit.tiqo.feature.calendar
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,7 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -114,21 +115,19 @@ private fun CalendarScreen(
             }
             if (agenda.isEmpty()) {
                 item {
-                    GlassSurface(Modifier.fillMaxWidth()) {
-                        Text(
-                            stringResource(R.string.calendar_empty),
-                            Modifier.padding(24.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        stringResource(R.string.calendar_empty),
+                        Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 22.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             } else {
                 items(agenda, key = { it.stableKey }) { AgendaCard(it) }
             }
         }
-        FloatingActionButton(
+        SmallFloatingActionButton(
             onClick = { editorVisible = true },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp),
             shape = CircleShape,
         ) { Icon(Icons.Rounded.Add, stringResource(R.string.add_item)) }
     }
@@ -156,7 +155,8 @@ private fun MonthHeader(month: YearMonth, onMoveMonth: (Long) -> Unit, onToday: 
             Text(
                 month.format(DateTimeFormatter.ofPattern("LLLL", PolishLocale))
                     .replaceFirstChar { it.titlecase(PolishLocale) },
-                style = MaterialTheme.typography.displaySmall,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.SemiBold,
             )
             Text(month.year.toString(), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -206,6 +206,7 @@ private fun MonthGrid(
                                 .aspectRatio(0.9f)
                                 .clip(CircleShape)
                                 .background(if (selected) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                .then(if (date == today && !selected) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, CircleShape) else Modifier)
                                 .clickable { onSelectDate(date) },
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,

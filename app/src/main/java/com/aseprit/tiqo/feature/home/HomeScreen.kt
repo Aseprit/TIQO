@@ -45,7 +45,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -76,6 +76,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aseprit.tiqo.R
 import com.aseprit.tiqo.core.designsystem.component.GlassSurface
+import com.aseprit.tiqo.core.designsystem.component.TiqoWeekDay
+import com.aseprit.tiqo.core.designsystem.component.TiqoTaskCard
 import com.aseprit.tiqo.core.designsystem.theme.tiqoAnimationsEnabled
 import com.aseprit.tiqo.domain.model.PlannerItem
 import com.aseprit.tiqo.domain.model.PlannerItemType
@@ -175,11 +177,11 @@ private fun HomeScreen(
                     onOpenSettings = onOpenSettings,
                     onOpenStatistics = onOpenStatistics,
                 )
-                Spacer(Modifier.height(18.dp))
+                Spacer(Modifier.height(10.dp))
                 WeekNavigation(onPrevious = { onMoveWeek(-1) }, onNext = { onMoveWeek(1) })
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 WeekStrip(uiState.selectedDate, uiState.firstDayOfWeek, onDateSelected)
-                Spacer(Modifier.height(22.dp))
+                Spacer(Modifier.height(18.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -220,8 +222,8 @@ private fun HomeScreen(
             }
         }
 
-        FloatingActionButton(
-            modifier = Modifier.align(Alignment.BottomEnd).padding(20.dp),
+        SmallFloatingActionButton(
+            modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp),
             onClick = {
                 editorItem = null
                 editorVisible = true
@@ -294,10 +296,13 @@ private fun DateHeader(
     val day = date.dayOfWeek.getDisplayName(TextStyle.FULL, PolishLocale)
         .replaceFirstChar { it.titlecase(PolishLocale) }
     val formatted = date.format(DateTimeFormatter.ofPattern("d MMMM yyyy", PolishLocale))
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("TIQO", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.weight(1f))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Tiqo", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Text(day, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+            Text(formatted, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+        }
+        Row {
             IconButton(onClick = onOpenStatistics) {
                 Icon(Icons.Rounded.BarChart, stringResource(R.string.statistics))
             }
@@ -305,29 +310,20 @@ private fun DateHeader(
                 Icon(Icons.Rounded.Settings, stringResource(R.string.settings))
             }
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            Text(day, style = MaterialTheme.typography.displaySmall)
-            Text(
-                formatted,
-                modifier = Modifier.padding(bottom = 6.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
 }
 
 @Composable
 private fun WeekNavigation(onPrevious: () -> Unit, onNext: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text("Tydzień", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row {
         IconButton(onClick = onPrevious) {
             Icon(Icons.Rounded.ChevronLeft, stringResource(R.string.previous_week))
         }
         IconButton(onClick = onNext) {
             Icon(Icons.Rounded.ChevronRight, stringResource(R.string.next_week))
+        }
         }
     }
 }
@@ -338,7 +334,6 @@ private fun WeekStrip(
     firstDayOfWeek: DayOfWeek,
     onDateSelected: (LocalDate) -> Unit,
 ) {
-    val animationSpec = if (MaterialTheme.tiqoAnimationsEnabled) tween<Color>(200) else snap()
     val daysFromStart = (selectedDate.dayOfWeek.value - firstDayOfWeek.value + 7) % 7
     val start = selectedDate.minusDays(daysFromStart.toLong())
     val today = LocalDate.now()
@@ -350,36 +345,14 @@ private fun WeekStrip(
             repeat(7) { index ->
                 val date = start.plusDays(index.toLong())
                 val selected = date == selectedDate
-                val container by animateColorAsState(
-                    if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
-                    animationSpec = animationSpec,
-                    label = "selected-day",
+                TiqoWeekDay(
+                    label = date.dayOfWeek.getDisplayName(TextStyle.SHORT, PolishLocale).take(2).uppercase(),
+                    day = date.dayOfMonth.toString(),
+                    selected = selected,
+                    today = date == today,
+                    onClick = { onDateSelected(date) },
+                    modifier = Modifier.weight(1f),
                 )
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(container)
-                        .then(
-                            if (date == today && !selected) {
-                                Modifier.border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(20.dp))
-                            } else Modifier
-                        )
-                        .clickable { onDateSelected(date) }
-                        .padding(vertical = 10.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text(
-                        date.dayOfWeek.getDisplayName(TextStyle.SHORT, PolishLocale).take(2).uppercase(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        date.dayOfMonth.toString(),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                    )
-                }
             }
         }
     }
@@ -399,7 +372,7 @@ private fun PlannerOccurrenceCard(
         animationSpec = if (MaterialTheme.tiqoAnimationsEnabled) tween(180) else snap(),
         label = "completion",
     )
-    GlassSurface(
+    TiqoTaskCard(
         modifier = Modifier
             .fillMaxWidth()
             .alpha(opacity)
@@ -417,7 +390,6 @@ private fun PlannerOccurrenceCard(
                     onLongClick()
                 },
             ),
-        cornerRadius = 22.dp,
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             when (occurrence.item.type) {
@@ -483,15 +455,10 @@ private fun CompletionCircle(completed: Boolean) {
 
 @Composable
 private fun EmptyDayCard(onAdd: () -> Unit) {
-    GlassSurface(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.nothing_planned), style = MaterialTheme.typography.titleMedium)
-            Text(
-                stringResource(R.string.nothing_planned_hint),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            TextButton(onClick = onAdd) { Text(stringResource(R.string.add_item)) }
-        }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(stringResource(R.string.nothing_planned), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.nothing_planned_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton(onClick = onAdd, contentPadding = PaddingValues(0.dp)) { Text(stringResource(R.string.add_item)) }
     }
 }
 

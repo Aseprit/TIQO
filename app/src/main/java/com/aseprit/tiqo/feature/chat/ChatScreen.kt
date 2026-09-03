@@ -26,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,14 +43,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aseprit.tiqo.R
+import com.aseprit.tiqo.ai.model.ModelManager
+import com.aseprit.tiqo.ai.model.ModelRole
 import com.aseprit.tiqo.core.designsystem.component.GlassSurface
 import com.aseprit.tiqo.core.designsystem.theme.tiqoAnimationsEnabled
 import com.aseprit.tiqo.domain.model.ChatMessage
 import com.aseprit.tiqo.domain.model.ChatRole
 
 @Composable
-fun ChatRoute(viewModel: ChatViewModel, onOpenModels: () -> Unit) {
+fun ChatRoute(viewModel: ChatViewModel, modelManager: ModelManager, onOpenModels: () -> Unit) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val models by modelManager.models.collectAsStateWithLifecycle()
+    val activeChat = models.firstOrNull { ModelRole.Chat in it.activeRoles }
+    LaunchedEffect(activeChat?.catalog?.id, activeChat?.loadedRoles?.contains(ModelRole.Chat)) {
+        if (activeChat != null && ModelRole.Chat !in activeChat.loadedRoles) modelManager.loadActiveModel(ModelRole.Chat)
+    }
     val unavailable = stringResource(R.string.ai_unavailable)
     ChatScreen(
         state = state,
@@ -57,6 +65,8 @@ fun ChatRoute(viewModel: ChatViewModel, onOpenModels: () -> Unit) {
         onStop = viewModel::stop,
         onUndo = viewModel::undo,
         onOpenModels = onOpenModels,
+        activeModelName = models.firstOrNull { ModelRole.Planner in it.activeRoles }?.catalog?.displayName
+            ?: activeChat?.catalog?.displayName,
     )
 }
 
@@ -67,6 +77,7 @@ private fun ChatScreen(
     onStop: () -> Unit,
     onUndo: (Long) -> Unit,
     onOpenModels: () -> Unit,
+    activeModelName: String?,
 ) {
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -86,9 +97,9 @@ private fun ChatScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.chat_title), style = MaterialTheme.typography.titleLarge)
+                Text(stringResource(R.string.chat_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Text(
-                    statusLabel(state.status),
+                    activeModelName?.let { "$it · ${statusLabel(state.status)}" } ?: "Brak aktywnego modelu",
                     color = if (state.status == ChatAiStatus.Ready) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelMedium,
                 )
@@ -100,22 +111,15 @@ private fun ChatScreen(
             )
         }
         if (state.messages.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                GlassSurface(Modifier.fillMaxWidth().padding(20.dp)) {
-                    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(stringResource(R.string.chat_empty_title), style = MaterialTheme.typography.titleLarge)
                         Text(
-                            stringResource(R.string.chat_empty_body),
+                            if (state.aiAvailable) "Napisz polecenie planera albo rozpocznij rozmowę." else "Wybierz lokalny model, aby zacząć.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Text(
-                            stringResource(R.string.manage_models),
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.clickable(onClick = onOpenModels).padding(top = 6.dp),
-                        )
+                        if (!state.aiAvailable) Button(onClick = onOpenModels) { Text("Wybierz model") }
                     }
-                }
             }
         } else {
             LazyColumn(
@@ -133,34 +137,34 @@ private fun ChatScreen(
                 }
             }
         }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text(stringResource(R.string.chat_input_hint)) },
-                maxLines = 5,
-                enabled = !state.isGenerating,
-            )
-            Spacer(Modifier.width(8.dp))
-            IconButton(
-                onClick = {
-                    if (state.isGenerating) onStop() else {
-                        onSend(input)
-                        input = ""
-                    }
-                },
-                modifier = Modifier.size(52.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
-                enabled = state.isGenerating || input.isNotBlank(),
-            ) {
-                Icon(
-                    if (state.isGenerating) Icons.Rounded.Stop else Icons.AutoMirrored.Rounded.Send,
-                    stringResource(if (state.isGenerating) R.string.stop else R.string.send),
-                    tint = MaterialTheme.colorScheme.onPrimary,
+        GlassSurface(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), cornerRadius = 26.dp) {
+            Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.Bottom) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text(if (state.aiAvailable) stringResource(R.string.chat_input_hint) else "Najpierw wybierz model") },
+                    maxLines = 5,
+                    enabled = !state.isGenerating && state.aiAvailable,
+                    shape = RoundedCornerShape(20.dp),
                 )
+                Spacer(Modifier.width(8.dp))
+                IconButton(
+                    onClick = {
+                        if (state.isGenerating) onStop() else {
+                            onSend(input)
+                            input = ""
+                        }
+                    },
+                    modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
+                    enabled = state.isGenerating || (input.isNotBlank() && state.aiAvailable),
+                ) {
+                    Icon(
+                        if (state.isGenerating) Icons.Rounded.Stop else Icons.AutoMirrored.Rounded.Send,
+                        stringResource(if (state.isGenerating) R.string.stop else R.string.send),
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
             }
         }
     }

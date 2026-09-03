@@ -82,7 +82,7 @@ class LiteRtLlmEngine(private val context: Context) : LlmEngine {
                     override fun getToolDescriptionJsonString(): String =
                         """{"name":${Gson().toJson(definition.name)},"description":${Gson().toJson(definition.description)},"parameters":${definition.inputSchema}}"""
 
-                    override fun execute(argumentsJson: String): String =
+                    override fun execute(paramsJsonString: String): String =
                         error("Tiqo uses manual tool execution")
                 })
             }

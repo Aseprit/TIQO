@@ -17,6 +17,7 @@ import com.aseprit.tiqo.domain.repository.ChatRepository
 import com.google.gson.Gson
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +35,16 @@ data class ChatUiState(
     val chatModelLoaded: Boolean = false,
     val status: ChatAiStatus = ChatAiStatus.Unavailable,
     val undoTokens: Map<Long, String> = emptyMap(),
+) {
+    val aiAvailable: Boolean get() = plannerLoaded || chatModelLoaded
+}
+
+private data class ChatCoreState(
+    val messages: List<ChatMessage>,
+    val generating: Boolean,
+    val plannerLoaded: Boolean,
+    val chatLoaded: Boolean,
+    val status: ChatAiStatus,
 )
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -53,35 +64,35 @@ class ChatViewModel(
         if (id == null) flowOf(emptyList()) else repository.observeMessages(id)
     }
 
-    val uiState: StateFlow<ChatUiState> = kotlinx.coroutines.flow.combine(
+    private val coreState = kotlinx.coroutines.flow.combine(
         messages,
         generating,
         plannerEngine.isLoaded,
         chatEngine.isLoaded,
         status,
-        undoTokens,
-    ) { values ->
-        @Suppress("UNCHECKED_CAST")
-        val plannerLoaded = values[2] as Boolean
-        val rawStatus = values[4] as ChatAiStatus
+    ) { currentMessages, isGenerating, plannerLoaded, chatLoaded, rawStatus ->
+        ChatCoreState(currentMessages, isGenerating, plannerLoaded, chatLoaded, rawStatus)
+    }
+
+    val uiState: StateFlow<ChatUiState> = kotlinx.coroutines.flow.combine(coreState, undoTokens) { core, currentUndoTokens ->
         ChatUiState(
-            messages = (values[0] as List<ChatMessage>).filter { it.role != ChatRole.Tool },
-            isGenerating = values[1] as Boolean,
-            plannerLoaded = plannerLoaded,
-            chatModelLoaded = values[3] as Boolean,
+            messages = core.messages.filter { it.role != ChatRole.Tool },
+            isGenerating = core.generating,
+            plannerLoaded = core.plannerLoaded,
+            chatModelLoaded = core.chatLoaded,
             status = when {
-                !plannerLoaded && rawStatus != ChatAiStatus.Generating -> ChatAiStatus.Unavailable
-                plannerLoaded && rawStatus == ChatAiStatus.Unavailable -> ChatAiStatus.Ready
-                else -> rawStatus
+                !core.plannerLoaded && !core.chatLoaded && core.status != ChatAiStatus.Generating -> ChatAiStatus.Unavailable
+                (core.plannerLoaded || core.chatLoaded) && core.status == ChatAiStatus.Unavailable -> ChatAiStatus.Ready
+                else -> core.status
             },
-            undoTokens = values[5] as Map<Long, String>,
+            undoTokens = currentUndoTokens,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ChatUiState())
 
     init {
         viewModelScope.launch {
             conversationId.value = repository.getOrCreateDefaultConversation()
-            status.value = if (plannerEngine.isLoaded.value) ChatAiStatus.Ready else ChatAiStatus.Unavailable
+            status.value = if (plannerEngine.isLoaded.value || chatEngine.isLoaded.value) ChatAiStatus.Ready else ChatAiStatus.Unavailable
         }
     }
 
@@ -93,6 +104,10 @@ class ChatViewModel(
             repository.addMessage(id, ChatRole.User, clean)
             generating.value = true
             try {
+                if (!plannerEngine.isLoaded.value && chatEngine.isLoaded.value) {
+                    streamChat(id, clean, unavailableMessage)
+                    return@launch
+                }
                 if (!plannerEngine.isLoaded.value) {
                     repository.addMessage(id, ChatRole.Assistant, unavailableMessage)
                     status.value = ChatAiStatus.Unavailable
@@ -140,13 +155,14 @@ class ChatViewModel(
     }
 
     fun stop() {
-        generationJob?.cancel()
+        val activeJob = generationJob
         generationJob = null
         generating.value = false
-        status.value = if (plannerEngine.isLoaded.value) ChatAiStatus.Ready else ChatAiStatus.Unavailable
         viewModelScope.launch {
             plannerEngine.stopGeneration()
             chatEngine.stopGeneration()
+            activeJob?.cancelAndJoin()
+            status.value = if (plannerEngine.isLoaded.value || chatEngine.isLoaded.value) ChatAiStatus.Ready else ChatAiStatus.Unavailable
         }
     }
 

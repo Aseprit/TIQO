@@ -10,12 +10,13 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 private fun darkScheme(accent: Color) = darkColorScheme(
     primary = accent,
-    onPrimary = Color(0xFF0E0B18),
+    onPrimary = if (accent.luminance() > 0.22f) Color(0xFF111018) else Color.White,
     primaryContainer = Color(0xFF302A4A),
     onPrimaryContainer = Color(0xFFECE7FF),
     secondary = accent,
@@ -44,7 +45,7 @@ private fun darkScheme(accent: Color) = darkColorScheme(
 
 private fun lightScheme(accent: Color) = lightColorScheme(
     primary = accent,
-    onPrimary = Color.White,
+    onPrimary = if (accent.luminance() > 0.22f) Color(0xFF111018) else Color.White,
     primaryContainer = Color(0xFFE7E0FF),
     onPrimaryContainer = Color(0xFF211552),
     secondary = accent,
@@ -114,6 +115,7 @@ fun TiqoTheme(
         MaterialTheme(
             colorScheme = colorScheme,
             typography = TiqoTypography,
+            shapes = TiqoMaterialShapes,
             content = content,
         )
     }

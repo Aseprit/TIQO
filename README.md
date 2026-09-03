@@ -2,7 +2,7 @@
 
 Tiqo to lokalny, natywny planner na Androida z polskim interfejsem, spokojnym glassmorphism UI i opcjonalną warstwą lokalnego AI. Planner działa w pełni bez modelu i bez połączenia z siecią.
 
-## Stan projektu — 0.3.0
+## Stan projektu — 0.4.0
 
 W aplikacji działają:
 
@@ -20,7 +20,8 @@ W aplikacji działają:
 - trwała historia czatu i oddzielne rekordy lokalnych tool calls/results,
 - manualny agent LiteRT-LM: 10 walidowanych narzędzi → Room → reminder → structured result → Undo,
 - osobne lokalne modele planner/chat, routing, streaming i rzeczywiste zatrzymanie generowania,
-- Model Manager z importem gated PlannerGemma oraz pobieraniem publicznego modelu czatu, progressem, anulowaniem i SHA-256,
+- trwały katalog własnych modeli z importem systemowym, rolami Planner/Chat, aktywnym wyborem, load/unload/delete i testem na urządzeniu,
+- katalog rekomendowanych gotowych pakietów z kontrolowanym pobieraniem, progressem, anulowaniem i SHA-256,
 - polski benchmark `planner-pl-v1`, powtarzalny SFT i pipeline konwersji `.litertlm`.
 
 ## Uruchomienie
@@ -57,9 +58,9 @@ Tiqo prosi o zgodę na powiadomienia na Androidzie 13+. Gdy system zezwala na do
 
 `LlmEngine` oddziela Compose, dane planera i konkretny runtime. Implementacja LiteRT-LM korzysta z manualnego tool callingu: runtime nigdy nie wykonuje funkcji sam. Tiqo odczytuje call, waliduje allow-listę i argumenty, blokuje nieznane identyfikatory, a dopiero potem używa wspólnego repozytorium Room. Planner pozostaje ciepły przez pięć minut tła, większy chat przez minutę; oba są zwalniane pod presją pamięci.
 
-Modele nie są dołączone do repozytorium. Gated PlannerGemma korzysta z legalnego ręcznego importu po zaakceptowaniu warunków; token Hugging Face nigdy nie trafia do APK. Publiczny Qwen 2.5 1.5B Chat może być pobrany bezpośrednio z Hugging Face, z kontrolą miejsca, dokładnego rozmiaru i SHA-256. Wszystko poza pobieraniem działa lokalnie.
+Modele nie są dołączone do repozytorium. Użytkownik może zaimportować dowolny gotowy pakiet `.litertlm`, nadać mu rolę Planner, Chat albo obie, a następnie aktywować i przetestować go bez modyfikowania danych planera. Wybór oraz metadata własnych modeli są trwałe. Gated PlannerGemma pozostaje ręcznym importem; token Hugging Face nigdy nie trafia do APK. Publiczny, gotowy pakiet Qwen 2.5 1.5B Chat może być pobrany z kontrolą miejsca, rozmiaru i SHA-256.
 
-Do działania poleceń AI w obecnym buildzie Android nadal potrzebny jest zgodny i przekonwertowany plik `.litertlm`; kod wykonawczy nie ma mock fallbacku. Custom SFT PlannerGemma jest zachowany, ale wstrzymany jako eksperyment. Aktualny pivot sprawdza publiczny Qwen3-0.6B jako planner/router bez fine-tuningu: [ai/benchmark/README.md](ai/benchmark/README.md). Integracja Android nastąpi dopiero po wyniku tego benchmarku.
+Obecny backend to LiteRT-LM 0.16.1 na CPU i obsługuje wyłącznie gotowe pakiety `.litertlm`. GGUF, surowe checkpointy Transformers, adres dowolnego repozytorium Hugging Face i konwersja na telefonie nie są obsługiwane. Sama końcówka pliku nie gwarantuje zgodności checkpointu; prawdziwą weryfikacją jest inicjalizacja runtime i test modelu. Model Planner musi dodatkowo poprawnie emitować tool calls zgodne ze schematem Tiqo. Szczegóły: [docs/MODEL_COMPATIBILITY.md](docs/MODEL_COMPATIBILITY.md).
 
 ## Architektura
 
@@ -68,8 +69,8 @@ Compose → ViewModel/Flow → domain contracts → Room/DataStore
                            ↑
 PlannerTools → validation ┘
 
-Chat UI → PlannerGemma → ToolCall → Validator → PlannerTools → Room
-                    └→ delegate_to_chat → opcjonalny lokalny Chat LLM
+Chat UI → aktywny Planner model → ToolCall → Validator → PlannerTools → Room
+                           └→ delegate_to_chat → aktywny lokalny Chat model
 ```
 
 Projekt pozostaje jednym modułem Gradle, ale pakiety oddzielają `feature`, `domain`, `data`, `notification`, `core/designsystem` i `ai`. Room jest jednym źródłem prawdy dla Home, Calendar, Statistics, reminders i tool calls. Szczegóły: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) i [docs/AI_ARCHITECTURE.md](docs/AI_ARCHITECTURE.md).

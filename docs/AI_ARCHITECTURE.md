@@ -4,7 +4,7 @@
 User message
     │
     ▼
-PlannerGemma (local LiteRT-LM)
+Active Planner model (local LiteRT-LM)
     │ manual tool call only
     ▼
 PlannerToolProtocol ── rejects malformed/unknown fields and enums
@@ -24,13 +24,13 @@ Room flows already drive Home and Calendar, so an AI-created or AI-updated item 
 
 ## Router
 
-PlannerGemma must emit exactly one of ten actions: `create_item`, `list_items`, `get_item`, `update_item`, `delete_item`, `set_completed`, `search_items`, `get_statistics`, `delegate_to_chat` or `request_clarification`.
+The active Planner model must emit exactly one of ten actions: `create_item`, `list_items`, `get_item`, `update_item`, `delete_item`, `set_completed`, `search_items`, `get_statistics`, `delegate_to_chat` or `request_clarification`.
 
 - Planner action: validate, execute, persist a tool call/result record and render a result card.
 - Ambiguous target: request clarification. Candidate IDs are supplied explicitly; the model may not invent an ID outside that set.
 - General request: `delegate_to_chat`. If the optional chat model is absent, Tiqo explains that it is required and links to Model Manager.
 
-Planner context contains the current local date, time, timezone, locale, selected UI date and at most 20 repository-derived candidate items. The model never supplies the current date from its weights. Conversation history is stored as separate Room rows; PlannerGemma receives minimal context, while the chat engine receives only recent non-tool turns.
+Planner context contains the current local date, time, timezone, locale, selected UI date and at most 20 repository-derived candidate items. The model never supplies the current date from its weights. Conversation history is stored as separate Room rows; the planner receives minimal context, while the chat engine receives only recent non-tool turns.
 
 ## Manual tool execution and safety
 
@@ -40,11 +40,13 @@ Unknown tools, unknown arguments, invalid dates/times/enums, empty changes, miss
 
 Mutations return a `PlannerActionCard` with action, stable item ID, title/date/time and an opaque in-memory Undo token. Create, update, delete and complete/reopen all register inverse operations. Room repository saves automatically cancel and reschedule Android alarms, so edits and Undo update reminders through the same deterministic path.
 
-## Models and lifecycle
+## Model registry, selection and lifecycle
 
-Planner and chat roles use separate `LiteRtLlmEngine` instances. PlannerGemma is asynchronously warmed when the app enters foreground and remains loaded for five minutes after backgrounding. The larger chat model unloads after one minute. Android memory pressure unloads both. Stop calls LiteRT-LM `cancelProcess()` so generation is actually cancelled.
+Planner and chat roles use separate `LiteRtLlmEngine` instances. `ModelManager` owns a persistent manifest for imported models and persistent active selections per role. An imported package can advertise Planner, Chat or both capabilities; activation always attempts a real runtime load before changing the active selection. The active planner is warmed when the app enters foreground, the active chat model loads on demand, and background/memory-pressure policies unload engines. Stop calls LiteRT-LM `cancelProcess()` before cancelling the collection job.
 
-The Model Manager supports manual import for gated PlannerGemma and real public download for compatible chat bundles, including progress, cancellation, free-space check, exact size, SHA-256 verification, load, unload and delete. No token or cloud fallback is embedded.
+The manager accepts only `.litertlm`, copies it into private app storage, records name/roles/backend/origin, and exposes size, status, load/unload/delete and a safe test. A Planner test supplies the real Tiqo tool schema but never invokes the executor; a Chat test uses a short text prompt. Recommended downloads are an allow-listed catalog of exact ready-made artifacts, not a universal Hugging Face URL downloader. No token or cloud fallback is embedded.
+
+File extension validation is only the first gate. `Engine.initialize()` remains the authoritative runtime compatibility check, while the planner tool test checks whether the checkpoint/template can emit a tool call. GGUF, `.task`, raw Safetensors/Transformers checkpoints and on-device conversion are outside the current backend.
 
 ## Privacy and logging
 

@@ -13,8 +13,8 @@ android {
         applicationId = "com.aseprit.tiqo"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
@@ -66,6 +66,7 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.litertlm.android)
+    implementation(libs.gson)
 
     ksp(libs.androidx.room.compiler)
 

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aseprit.tiqo.BuildConfig
 import com.aseprit.tiqo.R
+import com.aseprit.tiqo.ai.model.ModelManager
+import com.aseprit.tiqo.ai.model.ModelRole
 import com.aseprit.tiqo.core.designsystem.component.GlassSurface
 import com.aseprit.tiqo.data.settings.AccentOption
 import com.aseprit.tiqo.data.settings.ThemeMode
@@ -65,6 +68,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun SettingsRoute(
     viewModel: SettingsViewModel,
+    modelManager: ModelManager,
     reminderScheduler: AndroidReminderScheduler,
     onBack: () -> Unit,
     onRequestNotificationPermission: () -> Unit,
@@ -72,11 +76,14 @@ fun SettingsRoute(
     onOpenModels: () -> Unit,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val models by modelManager.models.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val notificationsGranted = Build.VERSION.SDK_INT < 33 ||
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     SettingsScreen(
         settings = settings,
+        activePlanner = models.firstOrNull { ModelRole.Planner in it.activeRoles }?.catalog?.displayName,
+        activeChat = models.firstOrNull { ModelRole.Chat in it.activeRoles }?.catalog?.displayName,
         notificationsGranted = notificationsGranted,
         exactAlarmsReady = reminderScheduler.canScheduleExactAlarms(),
         onBack = onBack,
@@ -98,6 +105,8 @@ fun SettingsRoute(
 @Composable
 private fun SettingsScreen(
     settings: com.aseprit.tiqo.data.settings.AppSettings,
+    activePlanner: String?,
+    activeChat: String?,
     notificationsGranted: Boolean,
     exactAlarmsReady: Boolean,
     onBack: () -> Unit,
@@ -121,7 +130,7 @@ private fun SettingsScreen(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, stringResource(R.string.close)) }
-            Text(stringResource(R.string.settings), style = MaterialTheme.typography.displaySmall)
+            Text(stringResource(R.string.settings), style = MaterialTheme.typography.headlineMedium)
         }
 
         SettingsSection(stringResource(R.string.appearance)) {
@@ -186,7 +195,9 @@ private fun SettingsScreen(
         }
 
         SettingsSection(stringResource(R.string.local_ai)) {
-            Text(stringResource(R.string.local_ai_summary), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SettingLink("Planner AI", activePlanner ?: "Nie wybrano") { onOpenModels() }
+            SettingLink("Chat AI", activeChat ?: "Nie wybrano") { onOpenModels() }
+            Text("Modele i dane planera pozostają na urządzeniu.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             SettingLink(stringResource(R.string.manage_models), "") { onOpenModels() }
         }
 
@@ -271,12 +282,16 @@ private fun SettingLink(title: String, value: String, onClick: () -> Unit) {
 @Composable
 private fun BoxAccent(accent: AccentOption, selected: Boolean, onClick: () -> Unit) {
     val color = Color(accent.argb)
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(
-            Modifier.size(38.dp).clip(CircleShape).background(color)
-                .clickable(onClick = onClick)
-                .then(if (selected) Modifier.padding(3.dp).background(MaterialTheme.colorScheme.surface, CircleShape) else Modifier),
-        )
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(CircleShape)
+            .then(if (selected) Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier)
+            .clickable(onClick = onClick)
+            .padding(5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Spacer(Modifier.fillMaxSize().clip(CircleShape).background(color))
     }
 }
 

@@ -1,6 +1,6 @@
 # Tiqo — roadmap
 
-Status fazy 3, 2026-09-02. Każdy etap kończy się działającym plannerem i kompilowalnym APK.
+Status fazy 4, 2026-09-03. Każdy etap kończy się działającym plannerem i kompilowalnym APK.
 
 ## Audyt wejściowy fazy 2
 
@@ -110,6 +110,19 @@ Status fazy 3, 2026-09-02. Każdy etap kończy się działającym plannerem i ko
 - [x] test end-to-end fake inference → parser → repository → reminder fields → Undo.
 
 ## TODO — po fazie 3
+
+### DONE — elastyczne modele i visual overhaul 0.4
+
+- [x] audyt rzeczywistego połączenia LiteRT-LM → agent → validator → Room,
+- [x] własny katalog importowanych `.litertlm` oddzielony od Compose,
+- [x] trwały wybór aktywnego Planner AI i Chat AI oraz role Planner/Chat/Both,
+- [x] import przez Android file picker, format/rozmiar/status, load/unload/delete,
+- [x] bezpieczny test czatu lub tool callingu bez wykonywania narzędzi i bez zmiany danych,
+- [x] uczciwa blokada GGUF, archiwów i surowych repozytoriów Hugging Face,
+- [x] centralne spacing/shapes/glass/elevation/motion oraz komponenty kart, przycisków, docka i dni,
+- [x] centralna naprawa koloru treści dark mode, kontrastu akcentu i light background,
+- [x] kompaktowy Home, rozdzielone today/selected, lekki empty state, mniejszy FAB i floating bottom dock,
+- [x] spójny Calendar, Chat CTA/status/composer oraz uproszczone Settings/Local AI.
 
 - [ ] testy wydajności i pełny offline scenario na docelowym telefonie po dostarczeniu finalnego `.litertlm`,
 - [ ] testy instrumentacyjne Room/migracji, gdy powstanie schema v2; v1 jest pierwszą bazą i nie ma poprzedniej bazy Room do migracji,

@@ -58,7 +58,7 @@ To pierwsza wersja Room projektu; poprzedni skeleton przechowywał dane wyłącz
 
 `ModelManager` przechowuje manifest poza UI i importuje pliki do prywatnego `files/models`. Nie ma automatycznego pobierania gated modeli ani tokenów w APK.
 
-`PlannerTools` waliduje typowane wywołania, daty i potwierdzenia operacji destrukcyjnych. Nie jest jeszcze połączony z parserem odpowiedzi konkretnego fine-tune; obecny czat generuje zwykły tekst. Dzięki temu nie przedstawiamy niesprawdzonego tool callingu jako gotowej funkcji.
+`PlannerTools` waliduje typowane wywołania, daty i potwierdzenia operacji destrukcyjnych. `PlannerAgent` przekazuje aktywnemu modelowi niezależny od checkpointu schemat, parsuje ręczny tool call i dopiero po walidacji wykonuje operację przez repozytorium. Model czatu nie otrzymuje narzędzi ani dostępu do danych planera.
 
 ## Composition root
 

@@ -1,18 +1,23 @@
 package com.aseprit.tiqo
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -20,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -30,7 +36,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.aseprit.tiqo.core.designsystem.component.GlassSurface
+import com.aseprit.tiqo.core.designsystem.component.TiqoBottomDock
 import com.aseprit.tiqo.core.designsystem.component.TiqoBackground
 import com.aseprit.tiqo.feature.calendar.CalendarRoute
 import com.aseprit.tiqo.feature.calendar.CalendarViewModel
@@ -120,7 +126,7 @@ fun TiqoApp(
                                 container.chatEngine,
                             ),
                         )
-                        ChatRoute(vm, onOpenModels = { navController.navigate(Route.Models) })
+                        ChatRoute(vm, container.modelManager, onOpenModels = { navController.navigate(Route.Models) })
                     }
                     composable(Route.Settings) {
                         val vm: SettingsViewModel = viewModel(
@@ -128,6 +134,7 @@ fun TiqoApp(
                         )
                         SettingsRoute(
                             viewModel = vm,
+                            modelManager = container.modelManager,
                             reminderScheduler = container.reminderScheduler,
                             onBack = navController::popBackStack,
                             onRequestNotificationPermission = onRequestNotificationPermission,
@@ -155,24 +162,24 @@ fun TiqoApp(
 
 @Composable
 private fun TiqoBottomBar(currentRoute: String?, onDestinationClick: (MainDestination) -> Unit) {
-    GlassSurface(
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        cornerRadius = 30.dp,
+    TiqoBottomDock(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 8.dp),
     ) {
-        NavigationBar(containerColor = Color.Transparent, tonalElevation = 0.dp) {
-            MainDestination.entries.forEach { destination ->
-                NavigationBarItem(
-                    selected = currentRoute == destination.route,
-                    onClick = { onDestinationClick(destination) },
-                    icon = { Icon(destination.icon, stringResource(destination.labelRes)) },
-                    label = { Text(stringResource(destination.labelRes)) },
-                    alwaysShowLabel = false,
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = MaterialTheme.colorScheme.onPrimary,
-                        indicatorColor = MaterialTheme.colorScheme.primary,
-                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    ),
-                )
+        MainDestination.entries.forEach { destination ->
+            val selected = currentRoute == destination.route
+            Surface(
+                modifier = Modifier.weight(1f).height(54.dp).clickable { onDestinationClick(destination) },
+                shape = RoundedCornerShape(18.dp),
+                color = if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                contentColor = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Icon(destination.icon, stringResource(destination.labelRes))
+                    if (selected) Text(stringResource(destination.labelRes), style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
     }

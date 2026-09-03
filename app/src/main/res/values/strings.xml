@@ -5,7 +5,6 @@
     <string name="nav_chat">Czat</string>
     <string name="settings">Ustawienia</string>
     <string name="statistics">Statystyki</string>
-    <string name="models">Modele lokalne</string>
     <string name="close">Zamknij</string>
     <string name="save">Zapisz</string>
     <string name="cancel">Anuluj</string>
@@ -83,7 +82,6 @@
     <string name="exact_alarm_unavailable">Dokładne alarmy wymagają dostępu systemowego</string>
     <string name="open_system_settings">Otwórz ustawienia systemowe</string>
     <string name="local_ai">Lokalne AI</string>
-    <string name="local_ai_summary">Planner działa bez modelu. Modele są opcjonalne i pozostają na urządzeniu.</string>
     <string name="manage_models">Zarządzaj modelami</string>
     <string name="data">Dane</string>
     <string name="data_local_only">Dane planera są przechowywane lokalnie w Room.</string>
@@ -96,21 +94,8 @@
     <string name="statistics_empty">Brak tasków do policzenia w tym tygodniu.</string>
     <string name="chat_title">Lokalny asystent</string>
     <string name="chat_empty_title">Zaplanuj coś po swojemu</string>
-    <string name="chat_empty_body">Historia rozmowy zostaje na urządzeniu. Model nie jest jeszcze zainstalowany.</string>
     <string name="chat_input_hint">Napisz wiadomość…</string>
     <string name="send">Wyślij</string>
     <string name="stop">Zatrzymaj</string>
     <string name="ai_unavailable">To żądanie wymaga lokalnego modelu. Zainstaluj go w Menedżerze modeli.</string>
-    <string name="ai_not_installed">Model niezainstalowany</string>
-    <string name="model_role_planner">Planner / tool calling</string>
-    <string name="model_role_chat">Czat ogólny</string>
-    <string name="model_not_installed">Niezainstalowany</string>
-    <string name="model_installed">Zainstalowany</string>
-    <string name="import_model">Importuj plik modelu</string>
-    <string name="delete_model">Usuń model</string>
-    <string name="load_model">Załaduj</string>
-    <string name="unload_model">Zwolnij pamięć</string>
-    <string name="model_loaded">Załadowany · AI Ready</string>
-    <string name="model_manual_only">Import ręczny — aplikacja nie obchodzi licencji ani gated access.</string>
-    <string name="model_license">Licencja: %1$s</string>
 </resources>
