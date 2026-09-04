@@ -30,6 +30,7 @@ class PlannerAgent(
     private val tools: PlannerTools,
     private val clock: Clock = Clock.systemDefaultZone(),
     private val locale: Locale = Locale("pl", "PL"),
+    private val inferenceTimeoutMillis: Long = PLANNER_INFERENCE_TIMEOUT_MILLIS,
 ) {
     suspend fun execute(
         command: String,
@@ -46,34 +47,23 @@ class PlannerAgent(
         )
         val started = System.nanoTime()
         onStatus(AiAgentStatus.Thinking)
-        var selectedCall: LlmEvent.ToolCall? = null
-        var failure: LlmEvent.Failure? = null
-        val textualOutput = StringBuilder()
-        engine.generate(
+        val inference = PlannerInferenceRunner(engine, inferenceTimeoutMillis).run(
             LlmRequest(
                 messages = listOf(
                     LlmMessage(LlmRole.System, systemInstruction(context)),
                     LlmMessage(LlmRole.User, command.trim()),
                 ),
                 availableTools = PlannerToolProtocol.definitions,
+                maxOutputTokens = PLANNER_MAX_OUTPUT_TOKENS,
             ),
-        ).collect { event ->
-            when (event) {
-                is LlmEvent.ToolCall -> if (selectedCall == null) {
-                    selectedCall = event
-                }
-                is LlmEvent.Token -> textualOutput.append(event.content)
-                is LlmEvent.Failure -> failure = event
-                else -> Unit
-            }
-        }
-        failure?.let {
+        )
+        inference.error?.let {
             onStatus(AiAgentStatus.Error)
-            return PlannerToolResult.ValidationError(it.reason)
+            return PlannerToolResult.ValidationError(it)
         }
-        val rawCall = PlannerToolCallAdapter.resolve(selectedCall, textualOutput.toString()).getOrElse {
+        val rawCall = inference.toolCall ?: run {
             onStatus(AiAgentStatus.Error)
-            return PlannerToolResult.ValidationError(it.message ?: "Model nie zwrócił poprawnego polecenia")
+            return PlannerToolResult.ValidationError("Model nie zwrócił poprawnego polecenia")
         }
         onToolCall(rawCall.name, rawCall.argumentsJson)
         val parsed = PlannerToolProtocol.parse(rawCall.name, rawCall.argumentsJson).getOrElse {

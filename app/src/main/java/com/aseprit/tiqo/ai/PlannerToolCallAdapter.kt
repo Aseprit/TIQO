@@ -15,21 +15,35 @@ internal object PlannerToolCallAdapter {
         options = setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
     )
 
-    fun resolve(nativeCall: LlmEvent.ToolCall?, textualOutput: String): Result<LlmEvent.ToolCall> = runCatching {
-        nativeCall ?: parseTextualCall(textualOutput)
-    }
+    fun resolve(nativeCall: LlmEvent.ToolCall?, textualOutput: String): Result<LlmEvent.ToolCall> =
+        resolveDetailed(nativeCall, textualOutput).asResult()
 
-    private fun parseTextualCall(rawOutput: String): LlmEvent.ToolCall {
-        val clean = thinkPattern.replace(rawOutput, "").trim()
-        val hermesCalls = toolCallPattern.findAll(clean).toList()
-        require(hermesCalls.size <= 1) { "Model zwrócił więcej niż jedno polecenie" }
-
-        val payload = when {
-            hermesCalls.size == 1 -> hermesCalls.single().groupValues[1]
-            clean.startsWith("{") && clean.endsWith("}") -> clean
-            else -> error("Model nie zwrócił poprawnego polecenia")
+    fun resolveDetailed(nativeCall: LlmEvent.ToolCall?, textualOutput: String): PlannerToolCallResolution {
+        if (nativeCall != null) {
+            return PlannerToolCallResolution(nativeCall, PlannerParserPath.Native)
         }
-        return parseJsonPayload(payload)
+        val clean = thinkPattern.replace(textualOutput, "").trim()
+        val hermesCalls = toolCallPattern.findAll(clean).toList()
+        if (hermesCalls.size > 1) {
+            return PlannerToolCallResolution(
+                call = null,
+                parserPath = PlannerParserPath.None,
+                error = "Model zwrócił więcej niż jedno polecenie",
+            )
+        }
+        val path = when {
+            hermesCalls.size == 1 -> PlannerParserPath.QwenXml
+            clean.startsWith("{") && clean.endsWith("}") -> PlannerParserPath.StrictJson
+            else -> PlannerParserPath.None
+        }
+        if (path == PlannerParserPath.None) {
+            return PlannerToolCallResolution(null, path, "Model nie zwrócił poprawnego polecenia")
+        }
+        val payload = if (path == PlannerParserPath.QwenXml) hermesCalls.single().groupValues[1] else clean
+        return runCatching { parseJsonPayload(payload) }.fold(
+            onSuccess = { PlannerToolCallResolution(it, path) },
+            onFailure = { PlannerToolCallResolution(null, path, it.message ?: "Nieprawidłowy tool call") },
+        )
     }
 
     private fun parseJsonPayload(payload: String): LlmEvent.ToolCall {
@@ -63,4 +77,20 @@ internal object PlannerToolCallAdapter {
         val unknown = json.keySet() - allowed.toSet()
         require(unknown.isEmpty()) { "Nieznane pola polecenia: ${unknown.joinToString()}" }
     }
+}
+
+internal enum class PlannerParserPath(val diagnosticName: String) {
+    Native("native"),
+    QwenXml("qwen_xml"),
+    StrictJson("strict_json"),
+    None("none"),
+}
+
+internal data class PlannerToolCallResolution(
+    val call: LlmEvent.ToolCall?,
+    val parserPath: PlannerParserPath,
+    val error: String? = null,
+) {
+    fun asResult(): Result<LlmEvent.ToolCall> = call?.let(Result.Companion::success)
+        ?: Result.failure(IllegalArgumentException(error ?: "Model nie zwrócił poprawnego polecenia"))
 }

@@ -249,7 +249,13 @@ class ChatViewModel(
             ),
         ) + languageHistory
         try {
-            chatEngine.generate(LlmRequest(history, sessionId = CHAT_SESSION_ID)).collect { event ->
+            chatEngine.generate(
+                LlmRequest(
+                    messages = history,
+                    sessionId = CHAT_SESSION_ID,
+                    maxOutputTokens = CHAT_MAX_OUTPUT_TOKENS,
+                ),
+            ).collect { event ->
                 when (event) {
                     is LlmEvent.Token -> {
                         pending.append(event.content)
@@ -321,6 +327,7 @@ class ChatViewModel(
     }
 
     private companion object {
+        const val CHAT_MAX_OUTPUT_TOKENS = 512
         val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
         const val CHAT_SESSION_ID = "tiqo-current-chat"
         const val CHAT_SYSTEM_INSTRUCTION = """Jesteś lokalnym asystentem konwersacyjnym Tiqo.

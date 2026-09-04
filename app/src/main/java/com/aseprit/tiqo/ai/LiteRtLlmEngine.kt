@@ -219,7 +219,7 @@ class LiteRtLlmEngine(private val context: Context) : LlmEngine {
                 tools = providers,
                 automaticToolCalling = false,
                 extraContext = if (request.availableTools.isEmpty()) emptyMap() else mapOf("enable_thinking" to false),
-                maxOutputToken = 256,
+                maxOutputToken = request.maxOutputTokens,
             ),
         )
         if (sessionId != null) {

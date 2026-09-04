@@ -39,7 +39,11 @@ data class LlmRequest(
     val availableTools: List<LlmTool> = emptyList(),
     /** Non-null keeps one runtime conversation alive between turns. */
     val sessionId: String? = null,
+    /** Per-request generation budget. Planner calls should be much shorter than chat replies. */
+    val maxOutputTokens: Int = DEFAULT_CHAT_MAX_OUTPUT_TOKENS,
 )
+
+const val DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 512
 
 data class LlmMessage(
     val role: LlmRole,

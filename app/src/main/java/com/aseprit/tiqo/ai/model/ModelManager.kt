@@ -4,16 +4,9 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.aseprit.tiqo.ai.LlmEngine
-import com.aseprit.tiqo.ai.LlmEvent
-import com.aseprit.tiqo.ai.LlmMessage
-import com.aseprit.tiqo.ai.LlmRequest
-import com.aseprit.tiqo.ai.LlmRole
 import com.aseprit.tiqo.ai.LlamaCppEngine
-import com.aseprit.tiqo.ai.tools.PlannerToolProtocol
 import com.google.gson.Gson
 import java.io.File
-import java.net.HttpURLConnection
-import java.net.URL
 import java.security.MessageDigest
 import java.util.UUID
 import kotlin.system.measureTimeMillis
@@ -22,8 +15,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +29,7 @@ enum class ModelRole { Planner, Chat }
 enum class ModelBackend { LiteRtLm, LlamaCpp, Unknown }
 enum class ModelFormat(val extension: String) { LiteRtLm("litertlm"), Gguf("gguf"), Unknown("") }
 enum class ModelOrigin { Recommended, Imported }
+enum class ModelCatalogTier { SmallExperimental, RecommendedChatCandidate, Alternative }
 enum class ModelCompatibility { Compatible, RuntimeUnavailable, UnsupportedFormat, MissingFile }
 
 data class ModelCatalogEntry(
@@ -55,6 +49,9 @@ data class ModelCatalogEntry(
     val recommendedRamGb: Int? = null,
     val contextTokens: Int? = null,
     val origin: ModelOrigin = ModelOrigin.Recommended,
+    val catalogTier: ModelCatalogTier = ModelCatalogTier.Alternative,
+    val sourceRepository: String? = null,
+    val sourceRevision: String? = null,
 )
 
 data class InstalledModelState(
@@ -80,13 +77,28 @@ data class ModelDownloadState(
     val progress: Float? = totalBytes?.takeIf { it > 0 }?.let { downloadedBytes.toFloat() / it }
 }
 
-enum class ModelTestStatus { Running, Passed, Failed }
+enum class ModelTestStatus { Running, Passed, Partial, Failed }
+enum class PlannerCompatibilityStatus { Compatible, ExperimentalPartial, Failed }
+
+data class ModelTestDiagnostic(
+    val scenario: String,
+    val rawOutput: String,
+    val nativeToolCall: String?,
+    val parserPath: String,
+    val parsedTool: String?,
+    val firstTokenTimeMillis: Long?,
+    val totalTimeMillis: Long,
+    val error: String?,
+)
 
 data class ModelTestState(
     val status: ModelTestStatus,
     val response: String = "",
     val loadTimeMillis: Long? = null,
     val generationTimeMillis: Long? = null,
+    val firstTokenTimeMillis: Long? = null,
+    val plannerCompatibility: PlannerCompatibilityStatus? = null,
+    val diagnostics: List<ModelTestDiagnostic> = emptyList(),
     val error: String? = null,
 )
 
@@ -103,9 +115,10 @@ class ModelManager(
     private val loadedModelIds = mutableMapOf<ModelRole, String>()
     private val idleUnloadJobs = mutableMapOf<ModelRole, Job>()
     private val downloadJobs = mutableMapOf<String, Job>()
+    private val downloader = ResumableModelDownloader()
     private val customEntries = loadCustomEntries().toMutableList()
     private val mutableModels = MutableStateFlow(readStates())
-    private val mutableDownloads = MutableStateFlow<Map<String, ModelDownloadState>>(emptyMap())
+    private val mutableDownloads = MutableStateFlow(readPartialDownloadStates())
     private val mutableTests = MutableStateFlow<Map<String, ModelTestState>>(emptyMap())
     val models: StateFlow<List<InstalledModelState>> = mutableModels.asStateFlow()
     val downloads: StateFlow<Map<String, ModelDownloadState>> = mutableDownloads.asStateFlow()
@@ -172,49 +185,43 @@ class ModelManager(
                 require(ModelFormatPolicy.backendFor(entry.fileName) == entry.backend && isRuntimeAvailable(entry.backend)) {
                     UNSUPPORTED_FORMAT_MESSAGE
                 }
-                require(modelDirectory.usableSpace > (entry.expectedSizeBytes ?: 0L) + MIN_FREE_SPACE_BYTES) {
+                val remainingBytes = entry.expectedSizeBytes?.let { (it - temporary.length()).coerceAtLeast(0L) } ?: 0L
+                require(modelDirectory.usableSpace > remainingBytes + MIN_FREE_SPACE_BYTES) {
                     "Za mało wolnego miejsca na model"
                 }
                 entry.roles.forEach { role -> if (loadedModelIds[role] == modelId) unloadRole(role) }
-                val connection = (URL(source).openConnection() as HttpURLConnection).apply {
-                    instanceFollowRedirects = true
-                    connectTimeout = 20_000
-                    readTimeout = 30_000
-                    setRequestProperty("User-Agent", "Tiqo-Android/${context.packageManager.getPackageInfo(context.packageName, 0).versionName}")
+                val userAgent = "Tiqo-Android/${context.packageManager.getPackageInfo(context.packageName, 0).versionName}"
+                val downloaded = downloader.download(source, temporary, userAgent, entry.expectedSizeBytes) { bytes, total ->
+                    updateDownload(ModelDownloadState(modelId, DownloadStatus.Downloading, bytes, total))
                 }
-                connection.connect()
-                require(connection.responseCode in 200..299) { "Serwer zwrócił HTTP ${connection.responseCode}" }
-                val total = connection.contentLengthLong.takeIf { it > 0 } ?: entry.expectedSizeBytes
-                var downloaded = 0L
-                updateDownload(ModelDownloadState(modelId, DownloadStatus.Downloading, totalBytes = total))
-                connection.inputStream.use { input ->
-                    temporary.outputStream().buffered().use { output ->
-                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE * 8)
-                        while (true) {
-                            ensureActive()
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            output.write(buffer, 0, read)
-                            downloaded += read
-                            updateDownload(ModelDownloadState(modelId, DownloadStatus.Downloading, downloaded, total))
-                        }
-                    }
-                }
-                connection.disconnect()
-                updateDownload(ModelDownloadState(modelId, DownloadStatus.Verifying, downloaded, total))
+                updateDownload(ModelDownloadState(modelId, DownloadStatus.Verifying, downloaded, entry.expectedSizeBytes))
                 validateFile(entry, temporary)
                 finalizeDownload(temporary, target)
                 refresh()
-                updateDownload(ModelDownloadState(modelId, DownloadStatus.Completed, downloaded, total))
+                updateDownload(ModelDownloadState(modelId, DownloadStatus.Completed, downloaded, entry.expectedSizeBytes))
             } catch (cancelled: CancellationException) {
-                temporary.delete()
-                updateDownload(ModelDownloadState(modelId, DownloadStatus.Cancelled))
+                updateDownload(
+                    ModelDownloadState(
+                        modelId,
+                        DownloadStatus.Cancelled,
+                        downloadedBytes = temporary.takeIf(File::isFile)?.length() ?: 0L,
+                        totalBytes = entry.expectedSizeBytes,
+                    ),
+                )
                 throw cancelled
             } catch (error: Throwable) {
-                temporary.delete()
-                updateDownload(ModelDownloadState(modelId, DownloadStatus.Failed, error = error.message ?: "Pobieranie nie powiodło się"))
+                updateDownload(
+                    ModelDownloadState(
+                        modelId,
+                        DownloadStatus.Failed,
+                        downloadedBytes = temporary.takeIf(File::isFile)?.length() ?: 0L,
+                        totalBytes = entry.expectedSizeBytes,
+                        error = error.message ?: "Pobieranie nie powiodło się",
+                    ),
+                )
             } finally {
-                downloadJobs.remove(modelId)
+                val currentJob = currentCoroutineContext()[Job]
+                if (currentJob == null) downloadJobs.remove(modelId) else downloadJobs.remove(modelId, currentJob)
             }
         }
     }
@@ -235,9 +242,9 @@ class ModelManager(
         if (result.isSuccess) {
             preferences.edit().putString(activeKey(role), modelId).apply()
         } else if (previous != null && previous != modelId) {
-            modelPath(previous)?.let { previousPath ->
-                if (engines[role]?.load(previousPath)?.isSuccess == true) loadedModelIds[role] = previous
-            }
+            loadModelLocked(previous, role)
+        } else if (previous == modelId) {
+            preferences.edit().remove(activeKey(role)).apply()
         }
         refresh()
         result
@@ -317,42 +324,10 @@ class ModelManager(
                 loadMillis = measureTimeMillis { engine.load(path).getOrThrow() }
                 loadedModelIds[role] = modelId
             }
-            val response = StringBuilder()
-            var toolCall: String? = null
             val plannerTest = role == ModelRole.Planner
-            val generationMillis = measureTimeMillis {
-                engine.generate(
-                    LlmRequest(
-                        messages = listOf(
-                            LlmMessage(
-                                LlmRole.System,
-                                if (plannerTest) "To jest bezpieczny test routingu. Wybierz właściwe narzędzie, ale niczego nie wykonuj."
-                                else "To jest bezpieczny test lokalnego modelu. Nie używaj narzędzi.",
-                            ),
-                            LlmMessage(
-                                LlmRole.User,
-                                if (plannerTest) "Nie podałem, które zadanie mam na myśli. Poproś o doprecyzowanie."
-                                else "Odpowiedz krótko po polsku: model działa.",
-                            ),
-                        ),
-                        availableTools = if (plannerTest) PlannerToolProtocol.definitions else emptyList(),
-                    ),
-                ).collect { event ->
-                    when (event) {
-                        is LlmEvent.Token -> response.append(event.content)
-                        is LlmEvent.Failure -> error(event.reason)
-                        is LlmEvent.ToolCall -> toolCall = event.name
-                        LlmEvent.Finished -> Unit
-                    }
-                }
-            }
-            if (plannerTest && toolCall == null) error("Model odpowiedział, ale nie utworzył wywołania narzędzia planera")
-            ModelTestState(
-                ModelTestStatus.Passed,
-                toolCall?.let { "Narzędzie: $it" } ?: response.toString().trim().take(500),
-                loadMillis,
-                generationMillis,
-            )
+            val tested = if (plannerTest) ModelCompatibilityTester(engine).testPlanner()
+            else ModelCompatibilityTester(engine).testChat()
+            tested.copy(loadTimeMillis = loadMillis)
         }
         if (previousId != modelId) {
             unloadRole(role)
@@ -381,8 +356,21 @@ class ModelManager(
         val engine = engines[role] ?: return Result.failure(IllegalStateException("Brak silnika dla roli $role"))
         unloadRole(role)
         val result = engine.load(path)
-        if (result.isSuccess) loadedModelIds[role] = modelId
-        return result
+        if (result.isFailure) return result
+        if (role == ModelRole.Planner) {
+            val testState = ModelCompatibilityTester(engine).testPlanner()
+            mutableTests.value = mutableTests.value + (modelId to testState)
+            if (testState.plannerCompatibility != PlannerCompatibilityStatus.Compatible) {
+                engine.unload()
+                return Result.failure(
+                    IllegalStateException(
+                        testState.error ?: "Model nie przeszedł pełnego testu zgodności Planner AI",
+                    ),
+                )
+            }
+        }
+        loadedModelIds[role] = modelId
+        return Result.success(Unit)
     }
 
     private fun scheduleUnload(role: ModelRole, delayMillis: Long) {
@@ -467,6 +455,18 @@ class ModelManager(
 
     private fun allEntries(): List<ModelCatalogEntry> = catalog + customEntries
 
+    private fun readPartialDownloadStates(): Map<String, ModelDownloadState> = allEntries().mapNotNull { entry ->
+        val partial = File(modelDirectory, "${entry.fileName}.partial")
+        partial.takeIf { it.isFile && it.length() > 0L }?.let {
+            entry.id to ModelDownloadState(
+                modelId = entry.id,
+                status = DownloadStatus.Cancelled,
+                downloadedBytes = it.length(),
+                totalBytes = entry.expectedSizeBytes,
+            )
+        }
+    }.toMap()
+
     private fun readStates(): List<InstalledModelState> = allEntries().map { entry ->
         val file = File(modelDirectory, entry.fileName)
         InstalledModelState(
@@ -502,23 +502,47 @@ class ModelManager(
 
         val catalog = listOf(
             ModelCatalogEntry(
-                id = "planner_gemma_270m",
-                displayName = "PlannerGemma 270M PL",
-                description = "Eksperymentalny model do poleceń planera.",
-                roles = setOf(ModelRole.Planner),
+                id = "qwen3_0_6b_nothink_q4",
+                displayName = "Qwen3 0.6B No-think INT4",
+                description = "Experimental Planner / Small Chat: zgodność planera wymaga self-testu na urządzeniu.",
+                roles = setOf(ModelRole.Planner, ModelRole.Chat),
                 backend = ModelBackend.LiteRtLm,
-                fileName = "planner-gemma-270m-pl.litertlm",
-                licenseName = "Gemma Terms of Use",
-                licenseUrl = "https://ai.google.dev/gemma/terms",
-                requiresLicenseAcceptance = true,
+                fileName = "qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm",
+                expectedSizeBytes = 347_251_840L,
+                checksumSha256 = "2df6821ec12702dafd33915e7a1a1adc7c4b053f3672fd9555dfaf3a114c4139",
+                downloadUrl = "https://huggingface.co/litert-community/Qwen3-0.6B-int4/resolve/6aa2daf8aba4aa456797fb8040b36a3948bcfda7/qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm",
+                licenseName = "Apache-2.0",
+                licenseUrl = "https://huggingface.co/litert-community/Qwen3-0.6B-int4",
                 minimumRamGb = 2,
                 recommendedRamGb = 4,
-                contextTokens = 1024,
+                contextTokens = 1280,
+                catalogTier = ModelCatalogTier.SmallExperimental,
+                sourceRepository = "litert-community/Qwen3-0.6B-int4",
+                sourceRevision = "6aa2daf8aba4aa456797fb8040b36a3948bcfda7",
+            ),
+            ModelCatalogEntry(
+                id = "qwen3_1_7b_dynamic_wi4b32",
+                displayName = "Qwen3 1.7B Dynamic INT4",
+                description = "Recommended Chat candidate: kandydat do późniejszego porównania jakości, bez deklaracji przewagi dla języka polskiego.",
+                roles = setOf(ModelRole.Chat),
+                backend = ModelBackend.LiteRtLm,
+                fileName = "Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm",
+                expectedSizeBytes = 977_184_032L,
+                checksumSha256 = "2eeffef7b51bc3e1225ea69fe7aa5f417397934b56a5b6c20cc068d6fd2c918b",
+                downloadUrl = "https://huggingface.co/litert-community/Qwen3-1.7B/resolve/d9b8a9126e5ac18591306eacd4311ba43b92421e/Qwen3-1.7B_dynamic_wi4b32_afp32.litertlm",
+                licenseName = "Apache-2.0",
+                licenseUrl = "https://huggingface.co/litert-community/Qwen3-1.7B",
+                minimumRamGb = 4,
+                recommendedRamGb = 6,
+                contextTokens = 4096,
+                catalogTier = ModelCatalogTier.RecommendedChatCandidate,
+                sourceRepository = "litert-community/Qwen3-1.7B",
+                sourceRevision = "d9b8a9126e5ac18591306eacd4311ba43b92421e",
             ),
             ModelCatalogEntry(
                 id = "qwen_2_5_1_5b_q8",
                 displayName = "Qwen 2.5 1.5B",
-                description = "Opcjonalny lokalny model do rozmów.",
+                description = "Większa alternatywa Chat (Q8, ok. 1,6 GB); dostępna, lecz nie jest domyślnym wyborem.",
                 roles = setOf(ModelRole.Chat),
                 backend = ModelBackend.LiteRtLm,
                 fileName = "qwen2.5-1.5b-q8-ekv4096.litertlm",
@@ -530,6 +554,9 @@ class ModelManager(
                 minimumRamGb = 4,
                 recommendedRamGb = 8,
                 contextTokens = 4096,
+                catalogTier = ModelCatalogTier.Alternative,
+                sourceRepository = "litert-community/Qwen2.5-1.5B-Instruct",
+                sourceRevision = "19edb84c69a0212f29a6ef17ba0d6f278b6a1614",
             ),
         )
     }

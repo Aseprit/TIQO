@@ -12,7 +12,10 @@ captures/
 *.litertlm
 *.gguf
 *.partial
-models/
+# Generated/downloaded model weights only. Never ignore source packages named "models".
+/models/
+/app/models/
+/app/src/main/assets/models/
 .venv*/
 ai/plannergemma/.cache/
 ai/plannergemma/models/
