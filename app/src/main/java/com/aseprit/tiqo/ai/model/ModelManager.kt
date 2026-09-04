@@ -8,6 +8,7 @@ import com.aseprit.tiqo.ai.LlmEvent
 import com.aseprit.tiqo.ai.LlmMessage
 import com.aseprit.tiqo.ai.LlmRequest
 import com.aseprit.tiqo.ai.LlmRole
+import com.aseprit.tiqo.ai.LlamaCppEngine
 import com.aseprit.tiqo.ai.tools.PlannerToolProtocol
 import com.google.gson.Gson
 import java.io.File
@@ -32,9 +33,10 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 enum class ModelRole { Planner, Chat }
-enum class ModelBackend { LiteRtLm, Unknown }
+enum class ModelBackend { LiteRtLm, LlamaCpp, Unknown }
+enum class ModelFormat(val extension: String) { LiteRtLm("litertlm"), Gguf("gguf"), Unknown("") }
 enum class ModelOrigin { Recommended, Imported }
-enum class ModelCompatibility { Compatible, UnsupportedFormat, MissingFile }
+enum class ModelCompatibility { Compatible, RuntimeUnavailable, UnsupportedFormat, MissingFile }
 
 data class ModelCatalogEntry(
     val id: String,
@@ -113,8 +115,11 @@ class ModelManager(
         runCatching {
             val entry = allEntries().first { it.id == modelId }
             val sourceName = querySourceName(source) ?: source.lastPathSegment ?: "model"
-            require(ModelFormatPolicy.isSupported(sourceName)) { UNSUPPORTED_FORMAT_MESSAGE }
-            require(entry.backend == ModelBackend.LiteRtLm && ModelFormatPolicy.isSupported(entry.fileName)) {
+            require(ModelFormatPolicy.backendFor(sourceName) == entry.backend) { UNSUPPORTED_FORMAT_MESSAGE }
+            require(isRuntimeAvailable(entry.backend)) {
+                if (entry.backend == ModelBackend.LlamaCpp) LlamaCppEngine.RUNTIME_UNAVAILABLE_MESSAGE else UNSUPPORTED_FORMAT_MESSAGE
+            }
+            require(ModelFormatPolicy.backendFor(entry.fileName) == entry.backend) {
                 UNSUPPORTED_FORMAT_MESSAGE
             }
             entry.roles.forEach { role -> if (loadedModelIds[role] == modelId) unloadRole(role) }
@@ -128,15 +133,20 @@ class ModelManager(
             runCatching {
                 require(roles.isNotEmpty()) { "Wybierz zastosowanie modelu" }
                 val sourceName = querySourceName(source) ?: source.lastPathSegment ?: "model"
-                require(ModelFormatPolicy.isSupported(sourceName)) { UNSUPPORTED_FORMAT_MESSAGE }
+                val format = ModelFormatPolicy.detect(sourceName)
+                require(format != ModelFormat.Unknown) { UNSUPPORTED_FORMAT_MESSAGE }
+                val backend = ModelFormatPolicy.backendFor(format)
+                require(isRuntimeAvailable(backend)) {
+                    if (backend == ModelBackend.LlamaCpp) LlamaCppEngine.RUNTIME_UNAVAILABLE_MESSAGE else UNSUPPORTED_FORMAT_MESSAGE
+                }
                 val id = "local_${UUID.randomUUID()}"
                 val entry = ModelCatalogEntry(
                     id = id,
                     displayName = displayName.trim().ifBlank { sourceName.substringBeforeLast('.') },
                     description = "Lokalny model zaimportowany przez użytkownika.",
                     roles = roles,
-                    backend = ModelBackend.LiteRtLm,
-                    fileName = "$id.litertlm",
+                    backend = backend,
+                    fileName = "$id.${format.extension}",
                     origin = ModelOrigin.Imported,
                 )
                 copyAndValidate(source, entry, File(modelDirectory, entry.fileName))
@@ -159,7 +169,9 @@ class ModelManager(
             val target = File(modelDirectory, entry.fileName)
             val temporary = File(modelDirectory, "${entry.fileName}.partial")
             try {
-                require(ModelFormatPolicy.isSupported(entry.fileName)) { UNSUPPORTED_FORMAT_MESSAGE }
+                require(ModelFormatPolicy.backendFor(entry.fileName) == entry.backend && isRuntimeAvailable(entry.backend)) {
+                    UNSUPPORTED_FORMAT_MESSAGE
+                }
                 require(modelDirectory.usableSpace > (entry.expectedSizeBytes ?: 0L) + MIN_FREE_SPACE_BYTES) {
                     "Za mało wolnego miejsca na model"
                 }
@@ -405,7 +417,9 @@ class ModelManager(
     }
 
     private fun validateFile(entry: ModelCatalogEntry, file: File) {
-        require(entry.backend == ModelBackend.LiteRtLm && ModelFormatPolicy.isSupported(entry.fileName)) { UNSUPPORTED_FORMAT_MESSAGE }
+        require(ModelFormatPolicy.backendFor(entry.fileName) == entry.backend && isRuntimeAvailable(entry.backend)) {
+            UNSUPPORTED_FORMAT_MESSAGE
+        }
         require(file.isFile && file.length() > 0) { "Plik modelu jest pusty" }
         entry.expectedSizeBytes?.let { require(file.length() == it) { "Nieprawidłowy rozmiar pliku modelu" } }
         entry.checksumSha256?.let { require(sha256(file).equals(it, ignoreCase = true)) { "Suma kontrolna modelu jest nieprawidłowa" } }
@@ -429,9 +443,13 @@ class ModelManager(
     private fun compatibility(entry: ModelCatalogEntry): ModelCompatibility {
         val file = File(modelDirectory, entry.fileName)
         if (!file.isFile) return ModelCompatibility.MissingFile
-        return if (entry.backend == ModelBackend.LiteRtLm && ModelFormatPolicy.isSupported(entry.fileName)) {
-            ModelCompatibility.Compatible
-        } else ModelCompatibility.UnsupportedFormat
+        if (ModelFormatPolicy.backendFor(entry.fileName) != entry.backend) return ModelCompatibility.UnsupportedFormat
+        return if (isRuntimeAvailable(entry.backend)) ModelCompatibility.Compatible else ModelCompatibility.RuntimeUnavailable
+    }
+
+    private fun isRuntimeAvailable(backend: ModelBackend): Boolean = when (backend) {
+        ModelBackend.LiteRtLm -> true
+        ModelBackend.LlamaCpp, ModelBackend.Unknown -> false
     }
 
     private fun sha256(file: File): String {
@@ -480,7 +498,7 @@ class ModelManager(
         private const val PLANNER_IDLE_UNLOAD_MILLIS = 5 * 60 * 1_000L
         private const val CHAT_IDLE_UNLOAD_MILLIS = 60 * 1_000L
         private const val MIN_FREE_SPACE_BYTES = 256L * 1024 * 1024
-        const val UNSUPPORTED_FORMAT_MESSAGE = "Nieobsługiwany format. Tiqo przyjmuje obecnie tylko gotowe pliki .litertlm."
+        const val UNSUPPORTED_FORMAT_MESSAGE = "Nieobsługiwany format modelu. Wybierz .litertlm albo zgodny plik .gguf."
 
         val catalog = listOf(
             ModelCatalogEntry(
@@ -518,5 +536,20 @@ class ModelManager(
 }
 
 object ModelFormatPolicy {
-    fun isSupported(fileName: String): Boolean = fileName.substringAfterLast('.', "").equals("litertlm", ignoreCase = true)
+    fun detect(fileName: String): ModelFormat = when (fileName.substringAfterLast('.', "").lowercase()) {
+        ModelFormat.LiteRtLm.extension -> ModelFormat.LiteRtLm
+        ModelFormat.Gguf.extension -> ModelFormat.Gguf
+        else -> ModelFormat.Unknown
+    }
+
+    fun backendFor(fileName: String): ModelBackend = backendFor(detect(fileName))
+
+    fun backendFor(format: ModelFormat): ModelBackend = when (format) {
+        ModelFormat.LiteRtLm -> ModelBackend.LiteRtLm
+        ModelFormat.Gguf -> ModelBackend.LlamaCpp
+        ModelFormat.Unknown -> ModelBackend.Unknown
+    }
+
+    /** A recognized format is not necessarily available in the current APK. */
+    fun isSupported(fileName: String): Boolean = detect(fileName) == ModelFormat.LiteRtLm
 }

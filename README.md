@@ -17,7 +17,7 @@ W aplikacji działają:
 - statystyki tygodniowe liczone wyłącznie z tasków,
 - dark/light/system theme, siedem kolorów akcentu i intensywność szkła,
 - lokalne powiadomienia z akcją „Gotowe”, obsługa restartu, czasu i strefy czasowej,
-- trwała historia czatu i oddzielne rekordy lokalnych tool calls/results,
+- jedna trwała bieżąca rozmowa, resetowana razem z runtime/KV przez „Nowa rozmowa”,
 - manualny agent LiteRT-LM: 10 walidowanych narzędzi → Room → reminder → structured result → Undo,
 - osobne lokalne modele planner/chat, routing, streaming i rzeczywiste zatrzymanie generowania,
 - trwały katalog własnych modeli z importem systemowym, rolami Planner/Chat, aktywnym wyborem, load/unload/delete i testem na urządzeniu,
@@ -60,7 +60,7 @@ Tiqo prosi o zgodę na powiadomienia na Androidzie 13+. Gdy system zezwala na do
 
 Modele nie są dołączone do repozytorium. Użytkownik może zaimportować dowolny gotowy pakiet `.litertlm`, nadać mu rolę Planner, Chat albo obie, a następnie aktywować i przetestować go bez modyfikowania danych planera. Wybór oraz metadata własnych modeli są trwałe. Gated PlannerGemma pozostaje ręcznym importem; token Hugging Face nigdy nie trafia do APK. Publiczny, gotowy pakiet Qwen 2.5 1.5B Chat może być pobrany z kontrolą miejsca, rozmiaru i SHA-256.
 
-Obecny backend to LiteRT-LM 0.16.1 na CPU i obsługuje wyłącznie gotowe pakiety `.litertlm`. GGUF, surowe checkpointy Transformers, adres dowolnego repozytorium Hugging Face i konwersja na telefonie nie są obsługiwane. Sama końcówka pliku nie gwarantuje zgodności checkpointu; prawdziwą weryfikacją jest inicjalizacja runtime i test modelu. Model Planner musi dodatkowo poprawnie emitować tool calls zgodne ze schematem Tiqo. Szczegóły: [docs/MODEL_COMPATIBILITY.md](docs/MODEL_COMPATIBILITY.md).
+Obecny wykonujący backend to LiteRT-LM 0.16.1 na CPU i obsługuje gotowe pakiety `.litertlm`. `.gguf` jest poprawnie rozpoznawany jako backend llama.cpp, lecz obecny APK nie zawiera jeszcze zweryfikowanego modułu JNI i odrzuca import z jawnym komunikatem. Sama końcówka pliku nie gwarantuje zgodności checkpointu; prawdziwą weryfikacją jest inicjalizacja runtime i test modelu. Szczegóły: [docs/MODEL_COMPATIBILITY.md](docs/MODEL_COMPATIBILITY.md).
 
 ## Architektura
 

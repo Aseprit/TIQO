@@ -63,14 +63,46 @@ class PlannerAgentTest {
         val result = PlannerToolProtocol.parse("delete_item", """{"item_id":1,"all":true}""")
         assertTrue(result.isFailure)
     }
+
+    @Test fun deletedOutsideChatIsAbsentFromNextAiSearch() = runBlocking {
+        val repository = AgentFakeRepository()
+        val engine = ScriptedEngine(
+            LlmEvent.ToolCall("create_item", """{"title":"Dentysta","type":"TASK","date":"2026-09-03","time":"10:00","all_day":false}"""),
+            LlmEvent.ToolCall("search_items", """{"query":"Dentysta","from":"2026-09-02","to":"2026-09-10"}"""),
+        )
+        val agent = PlannerAgent(engine, repository, PlannerTools(repository), clock)
+
+        agent.execute("Dodaj dentystę jutro o 10")
+        repository.delete(1L) // ordinary UI/repository change, outside chat
+        val current = agent.execute("O której mam dentystę?") as PlannerToolResult.Items
+
+        assertTrue(current.items.isEmpty())
+    }
+
+    @Test fun editedOutsideChatTimeWinsOverEarlierConversation() = runBlocking {
+        val repository = AgentFakeRepository()
+        val engine = ScriptedEngine(
+            LlmEvent.ToolCall("create_item", """{"title":"Dentysta","type":"TASK","date":"2026-09-03","time":"10:00","all_day":false}"""),
+            LlmEvent.ToolCall("search_items", """{"query":"Dentysta","from":"2026-09-02","to":"2026-09-10"}"""),
+        )
+        val agent = PlannerAgent(engine, repository, PlannerTools(repository), clock)
+
+        agent.execute("Dodaj dentystę jutro o 10")
+        repository.save(repository.items.single().copy(time = LocalTime.of(12, 0)))
+        val current = agent.execute("O której mam dentystę?") as PlannerToolResult.Items
+
+        assertEquals(LocalTime.of(12, 0), current.items.single().item.time)
+    }
 }
 
-private class ScriptedEngine(private val event: LlmEvent) : LlmEngine {
+private class ScriptedEngine(vararg events: LlmEvent) : LlmEngine {
+    private val events = events.toMutableList()
     override val descriptor = LlmDescriptor("test", "test", setOf(LlmCapability.PlannerToolCalls))
     override val isLoaded = MutableStateFlow(true)
     override suspend fun load(modelPath: String) = Result.success(Unit)
-    override fun generate(request: LlmRequest): Flow<LlmEvent> = flowOf(event, LlmEvent.Finished)
+    override fun generate(request: LlmRequest): Flow<LlmEvent> = flowOf(events.removeAt(0), LlmEvent.Finished)
     override suspend fun stopGeneration() = Unit
+    override suspend fun resetConversation() = Unit
     override suspend fun unload() { isLoaded.value = false }
 }
 

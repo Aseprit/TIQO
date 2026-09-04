@@ -65,4 +65,9 @@ class RoomChatRepository(private val dao: ChatDao) : ChatRepository {
     override suspend fun updateMessage(messageId: Long, content: String) {
         dao.updateMessageContent(messageId, content)
     }
+
+    override suspend fun clearConversation(conversationId: Long) {
+        dao.deleteMessages(conversationId)
+        dao.touchConversation(conversationId, System.currentTimeMillis())
+    }
 }

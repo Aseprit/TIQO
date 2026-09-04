@@ -30,7 +30,7 @@ The active Planner model must emit exactly one of ten actions: `create_item`, `l
 - Ambiguous target: request clarification. Candidate IDs are supplied explicitly; the model may not invent an ID outside that set.
 - General request: `delegate_to_chat`. If the optional chat model is absent, Tiqo explains that it is required and links to Model Manager.
 
-Planner context contains the current local date, time, timezone, locale, selected UI date and at most 20 repository-derived candidate items. The model never supplies the current date from its weights. Conversation history is stored as separate Room rows; the planner receives minimal context, while the chat engine receives only recent non-tool turns.
+Planner context contains the current local date, time, timezone, locale, selected UI date and at most 20 repository-derived candidate items. That candidate list is rebuilt from `PlannerRepository` for every request. Conversation history is language context only and is never a planner snapshot: read/search/statistics query the repository again, while get/update/delete/complete re-read the selected ID immediately in `PlannerTools`. A current tool result always wins over an earlier chat turn.
 
 ## Manual tool execution and safety
 
@@ -42,15 +42,15 @@ Mutations return a `PlannerActionCard` with action, stable item ID, title/date/t
 
 ## Model registry, selection and lifecycle
 
-Planner and chat roles use separate `LiteRtLlmEngine` instances. `ModelManager` owns a persistent manifest for imported models and persistent active selections per role. An imported package can advertise Planner, Chat or both capabilities; activation always attempts a real runtime load before changing the active selection. The active planner is warmed when the app enters foreground, the active chat model loads on demand, and background/memory-pressure policies unload engines. Stop calls LiteRT-LM `cancelProcess()` before cancelling the collection job.
+Planner and chat roles use separate `LiteRtLlmEngine` instances. Chat requests use a stable session ID, so the runtime `Conversation` and KV state survive ordinary screen navigation. Planner calls remain one-shot because their system context and repository candidates must be fresh. Stop calls LiteRT-LM `cancelProcess()` before cancelling the collection job and discards the interrupted runtime conversation; the next turn can rebuild it from the persisted current chat. “Nowa rozmowa” cancels inference, resets both engine conversations/KV state, clears the current Room conversation and clears Undo handles.
 
-The manager accepts only `.litertlm`, copies it into private app storage, records name/roles/backend/origin, and exposes size, status, load/unload/delete and a safe test. A Planner test supplies the real Tiqo tool schema but never invokes the executor; a Chat test uses a short text prompt. Recommended downloads are an allow-listed catalog of exact ready-made artifacts, not a universal Hugging Face URL downloader. No token or cloud fallback is embedded.
+The manager maps `.litertlm` to LiteRT-LM and `.gguf` to llama.cpp. Only LiteRT-LM is packaged in the current APK, so GGUF is recognized but rejected as `RuntimeUnavailable` before copying; it is never sent to LiteRT-LM and no non-working activation control is exposed. The `LlamaCppEngine` boundary documents that unavailable build state until a pinned, tested JNI module is included. A Planner test supplies the real Tiqo tool schema but never invokes the executor; a Chat test uses a short text prompt.
 
-File extension validation is only the first gate. `Engine.initialize()` remains the authoritative runtime compatibility check, while the planner tool test checks whether the checkpoint/template can emit a tool call. GGUF, `.task`, raw Safetensors/Transformers checkpoints and on-device conversion are outside the current backend.
+File extension validation is only the first gate. `Engine.initialize()` remains the authoritative runtime compatibility check, while the planner tool test checks whether the checkpoint/template can emit a tool call. Details and the concrete GGUF blocker are in `MODEL_COMPATIBILITY.md` and `PHASE4_RUNTIME_HANDOFF.md`.
 
 ## Privacy and logging
 
-Inference, planner data, chat history and tool execution are local. Production logging does not record prompt content. Debug builds log only selected tool, validation outcome and duration. No analytics, remote prompt logging or cloud LLM fallback is present.
+Inference, planner data, chat history and tool execution are local. Runtime diagnostics use the `TiqoLiteRt` tag and record lifecycle event, failure class, backend and aggregate JVM/native memory, never prompt content. Native LiteRT logs remain available in logcat. No analytics, remote prompt logging or cloud LLM fallback is present.
 
 ## Future executive-assistant boundary
 

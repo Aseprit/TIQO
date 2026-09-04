@@ -15,4 +15,5 @@ interface ChatRepository {
         toolPayload: String? = null,
     ): Long
     suspend fun updateMessage(messageId: Long, content: String)
+    suspend fun clearConversation(conversationId: Long)
 }

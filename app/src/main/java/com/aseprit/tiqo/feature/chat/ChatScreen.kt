@@ -63,6 +63,7 @@ fun ChatRoute(viewModel: ChatViewModel, modelManager: ModelManager, onOpenModels
         state = state,
         onSend = { viewModel.send(it, unavailable) },
         onStop = viewModel::stop,
+        onClear = viewModel::clearChat,
         onUndo = viewModel::undo,
         onOpenModels = onOpenModels,
         activeModelName = models.firstOrNull { ModelRole.Planner in it.activeRoles }?.catalog?.displayName
@@ -75,6 +76,7 @@ private fun ChatScreen(
     state: ChatUiState,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
+    onClear: () -> Unit,
     onUndo: (Long) -> Unit,
     onOpenModels: () -> Unit,
     activeModelName: String?,
@@ -104,11 +106,14 @@ private fun ChatScreen(
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
-            Text(
-                stringResource(R.string.manage_models),
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.clickable(onClick = onOpenModels).padding(8.dp),
-            )
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    stringResource(R.string.manage_models),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clickable(onClick = onOpenModels).padding(8.dp),
+                )
+                TextButton(onClick = onClear) { Text(stringResource(R.string.clear_chat)) }
+            }
         }
         if (state.messages.isEmpty()) {
             Box(Modifier.weight(1f).fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {

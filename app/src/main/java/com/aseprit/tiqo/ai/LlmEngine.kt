@@ -3,8 +3,8 @@ package com.aseprit.tiqo.ai
 /**
  * Boundary between Tiqo and a local language-model runtime.
  *
- * The first production implementation is intended to use LiteRT-LM. UI and planner
- * features must depend on this contract rather than on a concrete model runtime.
+ * UI and planner features depend on this contract rather than on LiteRT-LM or
+ * llama.cpp directly.
  */
 interface LlmEngine {
     val descriptor: LlmDescriptor
@@ -16,6 +16,9 @@ interface LlmEngine {
     fun generate(request: LlmRequest): kotlinx.coroutines.flow.Flow<LlmEvent>
 
     suspend fun stopGeneration()
+
+    /** Drops the runtime conversation/KV state without unloading model weights. */
+    suspend fun resetConversation()
 
     suspend fun unload()
 }
@@ -34,6 +37,8 @@ enum class LlmCapability {
 data class LlmRequest(
     val messages: List<LlmMessage>,
     val availableTools: List<LlmTool> = emptyList(),
+    /** Non-null keeps one runtime conversation alive between turns. */
+    val sessionId: String? = null,
 )
 
 data class LlmMessage(
@@ -52,9 +57,27 @@ data class LlmTool(
 sealed interface LlmEvent {
     data class Token(val content: String) : LlmEvent
     data class ToolCall(val name: String, val argumentsJson: String) : LlmEvent
-    data class Failure(val reason: String, val recoverable: Boolean) : LlmEvent
+    data class Failure(
+        val reason: String,
+        val recoverable: Boolean,
+        val kind: LlmFailureKind = LlmFailureKind.Inference,
+    ) : LlmEvent
     data object Finished : LlmEvent
 }
+
+enum class LlmFailureKind {
+    ModelLoad,
+    Inference,
+    NativeBackend,
+    OutOfMemory,
+    Cancelled,
+}
+
+class LlmRuntimeException(
+    val kind: LlmFailureKind,
+    message: String,
+    cause: Throwable? = null,
+) : RuntimeException(message, cause)
 
 class UnavailableLlmEngine : LlmEngine {
     override val descriptor = LlmDescriptor(
@@ -74,5 +97,6 @@ class UnavailableLlmEngine : LlmEngine {
         )
 
     override suspend fun stopGeneration() = Unit
+    override suspend fun resetConversation() = Unit
     override suspend fun unload() = Unit
 }

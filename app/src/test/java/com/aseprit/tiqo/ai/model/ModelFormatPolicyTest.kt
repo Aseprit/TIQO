@@ -12,7 +12,9 @@ class ModelFormatPolicyTest {
     }
 
     @Test fun rejectsArchivesAndOtherRuntimeFormats() {
-        assertFalse(ModelFormatPolicy.isSupported("model.gguf"))
+        assertEquals(ModelFormat.Gguf, ModelFormatPolicy.detect("model.gguf"))
+        assertEquals(ModelBackend.LlamaCpp, ModelFormatPolicy.backendFor("model.gguf"))
+        assertFalse(ModelFormatPolicy.isSupported("model.gguf")) // recognized, runtime not shipped
         assertFalse(ModelFormatPolicy.isSupported("model.task"))
         assertFalse(ModelFormatPolicy.isSupported("model.litertlm.zip"))
         assertFalse(ModelFormatPolicy.isSupported("model"))

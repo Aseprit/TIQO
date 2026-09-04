@@ -134,6 +134,10 @@ class PlannerAgent(
             Selected date: ${context.selectedDate}
             Candidate planner items: ${Gson().toJson(candidatePayload)}
             You are the active Tiqo planner router. Use exactly one provided function.
+            Room/repository and current tool results are the only source of truth for planner state.
+            Chat history is language context only: never assume an item still exists or is unchanged because it was mentioned earlier.
+            For read, search, update, delete, completion, reminder, or statistics requests, always use the matching tool.
+            Before any operation on an existing item, use only an ID from the current candidate list; the executor re-reads it from Room.
             Never answer general questions yourself. Ask for clarification instead of guessing a target.
         """.trimIndent()
     }

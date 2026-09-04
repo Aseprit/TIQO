@@ -17,6 +17,7 @@ import com.aseprit.tiqo.domain.repository.ChatRepository
 import com.google.gson.Gson
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class ChatAiStatus { Unavailable, Ready, Thinking, Executing, Generating, Error }
 
@@ -155,15 +157,31 @@ class ChatViewModel(
     }
 
     fun stop() {
-        val activeJob = generationJob
-        generationJob = null
-        generating.value = false
         viewModelScope.launch {
-            plannerEngine.stopGeneration()
-            chatEngine.stopGeneration()
-            activeJob?.cancelAndJoin()
+            cancelActiveGeneration()
             status.value = if (plannerEngine.isLoaded.value || chatEngine.isLoaded.value) ChatAiStatus.Ready else ChatAiStatus.Unavailable
         }
+    }
+
+    fun clearChat() {
+        val id = conversationId.value ?: return
+        viewModelScope.launch {
+            cancelActiveGeneration()
+            plannerEngine.resetConversation()
+            chatEngine.resetConversation()
+            repository.clearConversation(id)
+            undoTokens.value = emptyMap()
+            status.value = if (plannerEngine.isLoaded.value || chatEngine.isLoaded.value) ChatAiStatus.Ready else ChatAiStatus.Unavailable
+        }
+    }
+
+    private suspend fun cancelActiveGeneration() {
+        val activeJob = generationJob
+        generationJob = null
+        plannerEngine.stopGeneration()
+        chatEngine.stopGeneration()
+        activeJob?.cancelAndJoin()
+        generating.value = false
     }
 
     private suspend fun handlePlannerResult(
@@ -192,26 +210,58 @@ class ChatViewModel(
 
     private suspend fun streamChat(id: Long, request: String, unavailableMessage: String) {
         status.value = ChatAiStatus.Generating
-        var assistantMessageId: Long? = null
+        val assistantMessageId = repository.addMessage(id, ChatRole.Assistant, "")
         var partial = ""
+        val pending = StringBuilder()
+        var lastWriteNanos = System.nanoTime()
         val recent = uiState.value.messages
             .filter { it.role != ChatRole.Tool }
             .takeLast(8)
             .map { LlmMessage(if (it.role == ChatRole.User) LlmRole.User else LlmRole.Assistant, it.content) }
-        val history = if (recent.lastOrNull()?.content == request) recent else recent + LlmMessage(LlmRole.User, request)
-        chatEngine.generate(LlmRequest(history)).collect { event ->
-            when (event) {
-                is LlmEvent.Token -> {
-                    partial = if (event.content.startsWith(partial)) event.content else partial + event.content
-                    val messageId = assistantMessageId ?: repository.addMessage(id, ChatRole.Assistant, partial)
-                        .also { assistantMessageId = it }
-                    repository.updateMessage(messageId, partial)
+        val languageHistory = if (recent.lastOrNull()?.content == request) recent else recent + LlmMessage(LlmRole.User, request)
+        val history = listOf(
+            LlmMessage(
+                LlmRole.System,
+                "Historia rozmowy nie jest źródłem prawdy o plannerze. Nie potwierdzaj istnienia, godziny ani stanu wpisu planera na podstawie historii; takie dane muszą pochodzić z bieżącego wyniku narzędzia Room.",
+            ),
+        ) + languageHistory
+        try {
+            chatEngine.generate(LlmRequest(history, sessionId = CHAT_SESSION_ID)).collect { event ->
+                when (event) {
+                    is LlmEvent.Token -> {
+                        pending.append(event.content)
+                        val now = System.nanoTime()
+                        if (pending.length >= STREAM_BATCH_CHARS || now - lastWriteNanos >= STREAM_BATCH_NANOS) {
+                            partial += pending.toString()
+                            pending.clear()
+                            repository.updateMessage(assistantMessageId, partial)
+                            lastWriteNanos = now
+                        }
+                    }
+                    is LlmEvent.Failure -> {
+                        status.value = ChatAiStatus.Error
+                        if (partial.isEmpty() && pending.isEmpty()) {
+                            repository.updateMessage(assistantMessageId, failureMessage(event, unavailableMessage))
+                        }
+                    }
+                    is LlmEvent.ToolCall -> Unit
+                    LlmEvent.Finished -> Unit
                 }
-                is LlmEvent.Failure -> repository.addMessage(id, ChatRole.Assistant, unavailableMessage)
-                is LlmEvent.ToolCall -> Unit
-                LlmEvent.Finished -> Unit
+            }
+        } finally {
+            if (pending.isNotEmpty()) {
+                partial += pending.toString()
+                withContext(NonCancellable) { repository.updateMessage(assistantMessageId, partial) }
             }
         }
+    }
+
+    private fun failureMessage(event: LlmEvent.Failure, fallback: String): String = when (event.kind) {
+        com.aseprit.tiqo.ai.LlmFailureKind.OutOfMemory -> "Za mało pamięci, aby dokończyć odpowiedź. Zwolnij model lub wybierz mniejszy."
+        com.aseprit.tiqo.ai.LlmFailureKind.NativeBackend -> "Backend modelu nie uruchomił się na tym urządzeniu. Szczegóły zapisano w logcat (TiqoLiteRt)."
+        com.aseprit.tiqo.ai.LlmFailureKind.Cancelled -> "Generowanie zatrzymane."
+        com.aseprit.tiqo.ai.LlmFailureKind.ModelLoad -> fallback
+        com.aseprit.tiqo.ai.LlmFailureKind.Inference -> event.reason
     }
 
     private fun renderResult(result: PlannerToolResult): String = when (result) {
@@ -249,5 +299,8 @@ class ChatViewModel(
 
     private companion object {
         val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+        const val CHAT_SESSION_ID = "tiqo-current-chat"
+        const val STREAM_BATCH_CHARS = 24
+        const val STREAM_BATCH_NANOS = 50_000_000L
     }
 }

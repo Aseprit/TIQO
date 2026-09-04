@@ -97,5 +97,6 @@
     <string name="chat_input_hint">Napisz wiadomość…</string>
     <string name="send">Wyślij</string>
     <string name="stop">Zatrzymaj</string>
+    <string name="clear_chat">Nowa rozmowa</string>
     <string name="ai_unavailable">To żądanie wymaga lokalnego modelu. Zainstaluj go w Menedżerze modeli.</string>
 </resources>

@@ -66,6 +66,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.litertlm.android)
+    // LiteRT-LM's Conversation callbackFlow bytecode requires the interface-default
+    // bridges shipped by coroutines 1.11.0 (google-ai-edge/LiteRT-LM#2812).
+    implementation(libs.kotlinx.coroutines.android)
     implementation(libs.gson)
 
     ksp(libs.androidx.room.compiler)

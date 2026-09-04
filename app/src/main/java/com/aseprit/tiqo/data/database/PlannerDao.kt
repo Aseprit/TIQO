@@ -100,4 +100,7 @@ interface ChatDao {
 
     @Query("UPDATE chat_conversations SET updatedAtMillis = :updatedAtMillis WHERE id = :conversationId")
     suspend fun touchConversation(conversationId: Long, updatedAtMillis: Long)
+
+    @Query("DELETE FROM chat_messages WHERE conversationId = :conversationId")
+    suspend fun deleteMessages(conversationId: Long)
 }
