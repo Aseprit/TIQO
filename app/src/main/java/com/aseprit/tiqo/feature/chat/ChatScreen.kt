@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aseprit.tiqo.R
 import com.aseprit.tiqo.ai.model.ModelManager
+import com.aseprit.tiqo.ai.model.InstalledModelState
 import com.aseprit.tiqo.ai.model.ModelRole
 import com.aseprit.tiqo.core.designsystem.component.GlassSurface
 import com.aseprit.tiqo.core.designsystem.theme.tiqoAnimationsEnabled
@@ -66,8 +67,7 @@ fun ChatRoute(viewModel: ChatViewModel, modelManager: ModelManager, onOpenModels
         onClear = viewModel::clearChat,
         onUndo = viewModel::undo,
         onOpenModels = onOpenModels,
-        activeModelName = models.firstOrNull { ModelRole.Planner in it.activeRoles }?.catalog?.displayName
-            ?: activeChat?.catalog?.displayName,
+        loadedModelName = resolveLoadedModelName(models, state.activeRole),
     )
 }
 
@@ -79,7 +79,7 @@ private fun ChatScreen(
     onClear: () -> Unit,
     onUndo: (Long) -> Unit,
     onOpenModels: () -> Unit,
-    activeModelName: String?,
+    loadedModelName: String?,
 ) {
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -101,7 +101,7 @@ private fun ChatScreen(
             Column(Modifier.weight(1f)) {
                 Text(stringResource(R.string.chat_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Text(
-                    activeModelName?.let { "$it · ${statusLabel(state.status)}" } ?: "Brak aktywnego modelu",
+                    loadedModelName?.let { "$it · ${statusLabel(state.status)}" } ?: "Brak załadowanego modelu",
                     color = if (state.status == ChatAiStatus.Ready) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelMedium,
                 )
@@ -211,6 +211,13 @@ private fun MessageBubble(message: ChatMessage, canUndo: Boolean, onUndo: () -> 
                 TextButton(onClick = onUndo) { Text("COFNIJ") }
             }
         }
+    }
+}
+
+internal fun resolveLoadedModelName(models: List<InstalledModelState>, activeRole: ModelRole?): String? {
+    val roleOrder = listOfNotNull(activeRole, ModelRole.Chat, ModelRole.Planner).distinct()
+    return roleOrder.firstNotNullOfOrNull { role ->
+        models.firstOrNull { role in it.loadedRoles }?.catalog?.displayName
     }
 }
 

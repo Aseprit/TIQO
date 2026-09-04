@@ -52,6 +52,11 @@ class ChatViewModelTest {
         assertEquals(listOf("Napisz zdanie", "Ala ma kota"), repository.messages.value.map { it.content })
         assertEquals(1, chat.requests.size)
         assertEquals("tiqo-current-chat", chat.requests.single().sessionId)
+        assertEquals(
+            listOf("Napisz zdanie"),
+            chat.requests.single().messages.filter { it.role == com.aseprit.tiqo.ai.LlmRole.User }.map { it.content },
+        )
+        assertTrue(chat.requests.single().messages.first().content.contains("poprawnym współczesnym polskim"))
     }
 
     @Test fun stopCancelsGenerationAndKeepsPartialResponse() = runTest(dispatcher) {
@@ -107,8 +112,32 @@ class ChatViewModelTest {
         )
     }
 
-    private fun viewModel(repository: FakeChatRepository, chat: RecordingEngine): ChatViewModel {
-        val plannerEngine = RecordingEngine(loaded = false) { flowOf() }
+    @Test fun greetingFromPlannerTextToolCallIsDelegatedToLoadedChatModel() = runTest(dispatcher) {
+        val planner = RecordingEngine(loaded = true) {
+            flowOf(
+                LlmEvent.Token("""<tool_call>{"name":"delegate_to_chat","arguments":{"user_request":"Cześć"}}</tool_call>"""),
+                LlmEvent.Finished,
+            )
+        }
+        val chat = RecordingEngine { flowOf(LlmEvent.Token("Cześć!"), LlmEvent.Finished) }
+        val repository = FakeChatRepository()
+        val viewModel = viewModel(repository, chat, planner)
+        advanceUntilIdle()
+
+        viewModel.send("Cześć", "brak")
+        advanceUntilIdle()
+
+        assertEquals(1, chat.requests.size)
+        assertEquals("Cześć", chat.requests.single().messages.last().content)
+        assertEquals("Cześć!", repository.messages.value.last().content)
+        assertTrue(repository.messages.value.none { it.content == "Model nie zwrócił poprawnego polecenia" })
+    }
+
+    private fun viewModel(
+        repository: FakeChatRepository,
+        chat: RecordingEngine,
+        plannerEngine: RecordingEngine = RecordingEngine(loaded = false) { flowOf() },
+    ): ChatViewModel {
         val plannerRepository = EmptyPlannerRepository()
         return ChatViewModel(
             repository,

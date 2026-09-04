@@ -59,6 +59,51 @@ class PlannerAgentTest {
         assertTrue(repository.items.isEmpty())
     }
 
+    @Test fun qwenHermesToolCallCreatesTomorrowDentistAtSix() = runBlocking {
+        val repository = AgentFakeRepository()
+        val engine = ScriptedEngine(
+            LlmEvent.Token(
+                """<tool_call>{"name":"create_item","arguments":{"title":"Dentysta","type":"EVENT","date":"2026-09-03","time":"06:00","all_day":false}}</tool_call>""",
+            ),
+        )
+        val agent = PlannerAgent(engine, repository, PlannerTools(repository), clock, Locale("pl", "PL"))
+
+        val result = agent.execute("Jutro o 6 mam dentystę")
+
+        assertTrue(result is PlannerToolResult.Success)
+        assertEquals("Dentysta", repository.items.single().title)
+        assertEquals(LocalDate.of(2026, 9, 3), repository.items.single().startDate)
+        assertEquals(LocalTime.of(6, 0), repository.items.single().time)
+    }
+
+    @Test fun malformedQwenHermesToolCallIsRejectedWithoutMutation() = runBlocking {
+        val repository = AgentFakeRepository()
+        val engine = ScriptedEngine(
+            LlmEvent.Token("""<tool_call>{"name":"create_item","arguments":</tool_call>"""),
+        )
+        val agent = PlannerAgent(engine, repository, PlannerTools(repository), clock)
+
+        val result = agent.execute("Jutro o 6 mam dentystę")
+
+        assertTrue(result is PlannerToolResult.ValidationError)
+        assertTrue(repository.items.isEmpty())
+    }
+
+    @Test fun strictJsonToolCallFallbackStillUsesPlannerProtocol() = runBlocking {
+        val repository = AgentFakeRepository()
+        val engine = ScriptedEngine(
+            LlmEvent.Token(
+                """{"name":"create_item","arguments":{"title":"Dentysta","type":"EVENT","date":"2026-09-03","time":"06:00","all_day":false}}""",
+            ),
+        )
+        val agent = PlannerAgent(engine, repository, PlannerTools(repository), clock)
+
+        val result = agent.execute("Jutro o 6 mam dentystę")
+
+        assertTrue(result is PlannerToolResult.Success)
+        assertEquals(LocalTime.of(6, 0), repository.items.single().time)
+    }
+
     @Test fun protocolRejectsUnknownFields() {
         val result = PlannerToolProtocol.parse("delete_item", """{"item_id":1,"all":true}""")
         assertTrue(result.isFailure)

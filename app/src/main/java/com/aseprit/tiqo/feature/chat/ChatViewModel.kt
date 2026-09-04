@@ -10,6 +10,7 @@ import com.aseprit.tiqo.ai.LlmMessage
 import com.aseprit.tiqo.ai.LlmRequest
 import com.aseprit.tiqo.ai.LlmRole
 import com.aseprit.tiqo.ai.PlannerAgent
+import com.aseprit.tiqo.ai.model.ModelRole
 import com.aseprit.tiqo.ai.tools.PlannerToolResult
 import com.aseprit.tiqo.domain.model.ChatMessage
 import com.aseprit.tiqo.domain.model.ChatRole
@@ -35,6 +36,7 @@ data class ChatUiState(
     val isGenerating: Boolean = false,
     val plannerLoaded: Boolean = false,
     val chatModelLoaded: Boolean = false,
+    val activeRole: ModelRole? = null,
     val status: ChatAiStatus = ChatAiStatus.Unavailable,
     val undoTokens: Map<Long, String> = emptyMap(),
 ) {
@@ -46,6 +48,12 @@ private data class ChatCoreState(
     val generating: Boolean,
     val plannerLoaded: Boolean,
     val chatLoaded: Boolean,
+    val activeRole: ModelRole?,
+    val status: ChatAiStatus,
+)
+
+private data class ChatActivityState(
+    val activeRole: ModelRole?,
     val status: ChatAiStatus,
 )
 
@@ -59,6 +67,7 @@ class ChatViewModel(
     private val conversationId = MutableStateFlow<Long?>(null)
     private val generating = MutableStateFlow(false)
     private val status = MutableStateFlow(ChatAiStatus.Unavailable)
+    private val activeRole = MutableStateFlow<ModelRole?>(null)
     private val undoTokens = MutableStateFlow<Map<Long, String>>(emptyMap())
     private var generationJob: Job? = null
 
@@ -66,14 +75,18 @@ class ChatViewModel(
         if (id == null) flowOf(emptyList()) else repository.observeMessages(id)
     }
 
+    private val activityState = kotlinx.coroutines.flow.combine(status, activeRole) { currentStatus, currentRole ->
+        ChatActivityState(currentRole, currentStatus)
+    }
+
     private val coreState = kotlinx.coroutines.flow.combine(
         messages,
         generating,
         plannerEngine.isLoaded,
         chatEngine.isLoaded,
-        status,
-    ) { currentMessages, isGenerating, plannerLoaded, chatLoaded, rawStatus ->
-        ChatCoreState(currentMessages, isGenerating, plannerLoaded, chatLoaded, rawStatus)
+        activityState,
+    ) { currentMessages, isGenerating, plannerLoaded, chatLoaded, activity ->
+        ChatCoreState(currentMessages, isGenerating, plannerLoaded, chatLoaded, activity.activeRole, activity.status)
     }
 
     val uiState: StateFlow<ChatUiState> = kotlinx.coroutines.flow.combine(coreState, undoTokens) { core, currentUndoTokens ->
@@ -82,6 +95,7 @@ class ChatViewModel(
             isGenerating = core.generating,
             plannerLoaded = core.plannerLoaded,
             chatModelLoaded = core.chatLoaded,
+            activeRole = core.activeRole,
             status = when {
                 !core.plannerLoaded && !core.chatLoaded && core.status != ChatAiStatus.Generating -> ChatAiStatus.Unavailable
                 (core.plannerLoaded || core.chatLoaded) && core.status == ChatAiStatus.Unavailable -> ChatAiStatus.Ready
@@ -115,6 +129,7 @@ class ChatViewModel(
                     status.value = ChatAiStatus.Unavailable
                     return@launch
                 }
+                activeRole.value = ModelRole.Planner
                 val result = plannerAgent.execute(
                     command = clean,
                     onStatus = { agentStatus ->
@@ -171,6 +186,7 @@ class ChatViewModel(
             chatEngine.resetConversation()
             repository.clearConversation(id)
             undoTokens.value = emptyMap()
+            activeRole.value = null
             status.value = if (plannerEngine.isLoaded.value || chatEngine.isLoaded.value) ChatAiStatus.Ready else ChatAiStatus.Unavailable
         }
     }
@@ -209,6 +225,7 @@ class ChatViewModel(
     }
 
     private suspend fun streamChat(id: Long, request: String, unavailableMessage: String) {
+        activeRole.value = ModelRole.Chat
         status.value = ChatAiStatus.Generating
         val assistantMessageId = repository.addMessage(id, ChatRole.Assistant, "")
         var partial = ""
@@ -216,13 +233,19 @@ class ChatViewModel(
         var lastWriteNanos = System.nanoTime()
         val recent = uiState.value.messages
             .filter { it.role != ChatRole.Tool }
+            .filter { it.content.isNotBlank() }
             .takeLast(8)
-            .map { LlmMessage(if (it.role == ChatRole.User) LlmRole.User else LlmRole.Assistant, it.content) }
-        val languageHistory = if (recent.lastOrNull()?.content == request) recent else recent + LlmMessage(LlmRole.User, request)
+            .toMutableList()
+        if (recent.lastOrNull()?.role == ChatRole.User && recent.last().content == request) {
+            recent.removeAt(recent.lastIndex)
+        }
+        val languageHistory = recent.map {
+            LlmMessage(if (it.role == ChatRole.User) LlmRole.User else LlmRole.Assistant, it.content)
+        } + LlmMessage(LlmRole.User, request)
         val history = listOf(
             LlmMessage(
                 LlmRole.System,
-                "Historia rozmowy nie jest źródłem prawdy o plannerze. Nie potwierdzaj istnienia, godziny ani stanu wpisu planera na podstawie historii; takie dane muszą pochodzić z bieżącego wyniku narzędzia Room.",
+                CHAT_SYSTEM_INSTRUCTION,
             ),
         ) + languageHistory
         try {
@@ -300,6 +323,11 @@ class ChatViewModel(
     private companion object {
         val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
         const val CHAT_SESSION_ID = "tiqo-current-chat"
+        const val CHAT_SYSTEM_INSTRUCTION = """Jesteś lokalnym asystentem konwersacyjnym Tiqo.
+Odpowiadaj w języku użytkownika. Jeśli użytkownik pisze po polsku, odpowiadaj naturalnym i poprawnym współczesnym polskim.
+Nie mieszaj języków, nie twórz dziwnych neologizmów i preferuj proste, zwięzłe zdania.
+Historia rozmowy jest tylko kontekstem językowym, a nie źródłem prawdy o danych planera.
+Nie potwierdzaj istnienia, godziny ani stanu wpisu planera na podstawie historii; takie dane muszą pochodzić z bieżącego wyniku narzędzia Room."""
         const val STREAM_BATCH_CHARS = 24
         const val STREAM_BATCH_NANOS = 50_000_000L
     }

@@ -48,6 +48,7 @@ class PlannerAgent(
         onStatus(AiAgentStatus.Thinking)
         var selectedCall: LlmEvent.ToolCall? = null
         var failure: LlmEvent.Failure? = null
+        val textualOutput = StringBuilder()
         engine.generate(
             LlmRequest(
                 messages = listOf(
@@ -60,8 +61,8 @@ class PlannerAgent(
             when (event) {
                 is LlmEvent.ToolCall -> if (selectedCall == null) {
                     selectedCall = event
-                    onToolCall(event.name, event.argumentsJson)
                 }
+                is LlmEvent.Token -> textualOutput.append(event.content)
                 is LlmEvent.Failure -> failure = event
                 else -> Unit
             }
@@ -70,10 +71,11 @@ class PlannerAgent(
             onStatus(AiAgentStatus.Error)
             return PlannerToolResult.ValidationError(it.reason)
         }
-        val rawCall = selectedCall ?: run {
+        val rawCall = PlannerToolCallAdapter.resolve(selectedCall, textualOutput.toString()).getOrElse {
             onStatus(AiAgentStatus.Error)
-            return PlannerToolResult.ValidationError("Model nie zwrócił poprawnego polecenia")
+            return PlannerToolResult.ValidationError(it.message ?: "Model nie zwrócił poprawnego polecenia")
         }
+        onToolCall(rawCall.name, rawCall.argumentsJson)
         val parsed = PlannerToolProtocol.parse(rawCall.name, rawCall.argumentsJson).getOrElse {
             onStatus(AiAgentStatus.Error)
             debugLog(rawCall.name, false, started)
@@ -127,18 +129,20 @@ class PlannerAgent(
             )
         }
         return """
+            Jesteś lokalnym routerem planera Tiqo. Zawsze wywołaj dokładnie jedno z dostarczonych narzędzi i nie odpowiadaj tekstem.
+            Polecenia planera mapuj na właściwe narzędzie. Powitania, zwykłą rozmowę i pytania ogólne zawsze kieruj przez delegate_to_chat, zachowując treść użytkownika.
+            Gdy cel lub wymagana zmiana są niejednoznaczne, użyj request_clarification zamiast zgadywać.
+            Daty i godziny zwracaj w formacie ISO. Dla względnych dat, takich jak „jutro”, oblicz konkretną datę na podstawie Current local date.
             Current local date: ${context.currentDate}
             Current local time: ${context.currentTime.withSecond(0).withNano(0)}
             Timezone: ${context.zoneId.id}
             Locale: ${context.locale.toLanguageTag()}
             Selected date: ${context.selectedDate}
             Candidate planner items: ${Gson().toJson(candidatePayload)}
-            You are the active Tiqo planner router. Use exactly one provided function.
-            Room/repository and current tool results are the only source of truth for planner state.
-            Chat history is language context only: never assume an item still exists or is unchanged because it was mentioned earlier.
-            For read, search, update, delete, completion, reminder, or statistics requests, always use the matching tool.
-            Before any operation on an existing item, use only an ID from the current candidate list; the executor re-reads it from Room.
-            Never answer general questions yourself. Ask for clarification instead of guessing a target.
+            Room/repository i bieżące wyniki narzędzi są jedynym źródłem prawdy o danych planera.
+            Historia rozmowy jest tylko kontekstem językowym: nie zakładaj na jej podstawie, że wpis nadal istnieje lub się nie zmienił.
+            Dla odczytu, wyszukania, zmiany, usunięcia, ukończenia, przypomnienia lub statystyk zawsze użyj właściwego narzędzia.
+            Przed operacją na istniejącym wpisie użyj wyłącznie ID z bieżącej listy kandydatów; executor ponownie odczyta wpis z Room.
         """.trimIndent()
     }
 
