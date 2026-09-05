@@ -1,7 +1,6 @@
 package com.aseprit.tiqo.ai
 
 import android.content.Context
-import android.os.Debug
 import android.util.Log
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
@@ -11,12 +10,16 @@ import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.ai.edge.litertlm.tool
 import com.google.gson.Gson
 import java.io.File
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,7 +29,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-class LiteRtLlmEngine(private val context: Context) : LlmEngine {
+class LiteRtLlmEngine(
+    private val context: Context,
+    private val diagnostics: InferenceDiagnostics = InferenceDiagnostics(context),
+) : LlmEngine {
     override val descriptor = LlmDescriptor(
         id = "litertlm",
         displayName = "LiteRT-LM",
@@ -91,29 +97,75 @@ class LiteRtLlmEngine(private val context: Context) : LlmEngine {
             }
             var conversation: Conversation? = null
             var closeAfterGeneration = request.sessionId == null
+            var nativeCompletion: CompletableDeferred<Unit>? = null
             cancellationRequested = false
             try {
+                recordDiagnostic(request, "before_conversation_create")
                 val currentConversation = conversationFor(currentEngine, request, lastUserIndex)
                 conversation = currentConversation
+                recordDiagnostic(request, "after_conversation_create")
                 Log.i(TAG, "event=inference_start backend=CPU persistent=${request.sessionId != null} ${memorySnapshot()}")
                 activeConversation = currentConversation
                 val emittedCalls = mutableSetOf<String>()
-                currentConversation.sendMessageAsync(Message.user(prompt)).collect { message ->
-                    message.toolCalls.forEach { call ->
-                        val arguments = Gson().toJson(call.arguments)
-                        val key = "${call.name}:$arguments"
-                        if (emittedCalls.add(key)) emit(LlmEvent.ToolCall(call.name, arguments))
+                var firstEventRecorded = false
+                recordDiagnostic(request, "before_native_send")
+                val nativeMessages = Channel<Message>(Channel.UNLIMITED)
+                val completion = CompletableDeferred<Unit>()
+                nativeCompletion = completion
+                currentConversation.sendMessageAsync(
+                    Message.user(prompt),
+                    object : MessageCallback {
+                        override fun onMessage(message: Message) {
+                            nativeMessages.trySend(message)
+                        }
+
+                        override fun onDone() {
+                            nativeMessages.close()
+                            completion.complete(Unit)
+                        }
+
+                        override fun onError(throwable: Throwable) {
+                            nativeMessages.close(throwable)
+                            completion.complete(Unit)
+                        }
+                    },
+                )
+                try {
+                    for (message in nativeMessages) {
+                        if (!firstEventRecorded) {
+                            firstEventRecorded = true
+                            recordDiagnostic(request, "first_native_event")
+                        }
+                        message.toolCalls.forEach { call ->
+                            val arguments = Gson().toJson(call.arguments)
+                            val key = "${call.name}:$arguments"
+                            if (emittedCalls.add(key)) emit(LlmEvent.ToolCall(call.name, arguments))
+                        }
+                        val text = message.contents.contents
+                            .filterIsInstance<Content.Text>()
+                            .joinToString(separator = "") { it.text }
+                        if (text.isNotEmpty()) emit(LlmEvent.Token(text))
                     }
-                    val text = message.contents.contents
-                        .filterIsInstance<Content.Text>()
-                        .joinToString(separator = "") { it.text }
-                    if (text.isNotEmpty()) emit(LlmEvent.Token(text))
+                    completion.await()
+                } finally {
+                    nativeMessages.cancel()
                 }
+                recordDiagnostic(request, "after_native_send")
                 emit(LlmEvent.Finished)
                 Log.i(TAG, "event=inference_finished backend=CPU ${memorySnapshot()}")
             } catch (cancelled: CancellationException) {
                 closeAfterGeneration = true
                 Log.i(TAG, "event=inference_cancelled backend=CPU", cancelled)
+                val completion = nativeCompletion
+                val currentConversation = conversation
+                if (completion != null && currentConversation != null && !completion.isCompleted) {
+                    recordDiagnostic(request, "native_cancel_requested")
+                    withContext(NonCancellable) {
+                        currentConversation.cancelProcess()
+                        completion.await()
+                    }
+                    recordDiagnostic(request, "native_cancel_completed")
+                }
                 throw cancelled
             } catch (error: Throwable) {
                 closeAfterGeneration = true
@@ -128,6 +180,7 @@ class LiteRtLlmEngine(private val context: Context) : LlmEngine {
                 )
             } finally {
                 if (cancellationRequested) closeAfterGeneration = true
+                recordDiagnostic(request, "before_conversation_close")
                 if (closeAfterGeneration) closeConversation(conversation)
                 if (persistentConversation === conversation && closeAfterGeneration) {
                     persistentConversation = null
@@ -135,6 +188,7 @@ class LiteRtLlmEngine(private val context: Context) : LlmEngine {
                 }
                 activeConversation = null
                 cancellationRequested = false
+                recordDiagnostic(request, "after_conversation_close")
             }
         }
     }.flowOn(Dispatchers.Default)
@@ -251,14 +305,14 @@ class LiteRtLlmEngine(private val context: Context) : LlmEngine {
     }
 
     private fun memorySnapshot(): String {
-        val runtime = Runtime.getRuntime()
-        val javaUsedMb = (runtime.totalMemory() - runtime.freeMemory()) / MEBIBYTE
-        val nativeUsedMb = Debug.getNativeHeapAllocatedSize() / MEBIBYTE
-        return "javaUsedMb=$javaUsedMb nativeUsedMb=$nativeUsedMb javaMaxMb=${runtime.maxMemory() / MEBIBYTE}"
+        return diagnostics.memorySnapshot()
+    }
+
+    private fun recordDiagnostic(request: LlmRequest, stage: String) {
+        request.diagnosticTag?.let { tag -> diagnostics.record("$tag:$stage") }
     }
 
     private companion object {
         const val TAG = "TiqoLiteRt"
-        const val MEBIBYTE = 1024L * 1024L
     }
 }

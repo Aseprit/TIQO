@@ -7,6 +7,7 @@ import com.aseprit.tiqo.data.repository.RoomChatRepository
 import com.aseprit.tiqo.data.settings.SettingsRepository
 import com.aseprit.tiqo.notification.AndroidReminderScheduler
 import com.aseprit.tiqo.ai.LiteRtLlmEngine
+import com.aseprit.tiqo.ai.InferenceDiagnostics
 import com.aseprit.tiqo.ai.PlannerAgent
 import com.aseprit.tiqo.ai.model.ModelManager
 import com.aseprit.tiqo.ai.model.ModelRole
@@ -24,12 +25,14 @@ class AppContainer(context: Context) {
         reminderScheduler = reminderScheduler,
     )
     val chatRepository = RoomChatRepository(database.chatDao())
-    val plannerEngine = LiteRtLlmEngine(context)
-    val chatEngine = LiteRtLlmEngine(context)
+    val inferenceDiagnostics = InferenceDiagnostics(context)
+    val plannerEngine = LiteRtLlmEngine(context, inferenceDiagnostics)
+    val chatEngine = LiteRtLlmEngine(context, inferenceDiagnostics)
     val plannerTools = PlannerTools(plannerRepository)
     val plannerAgent = PlannerAgent(plannerEngine, plannerRepository, plannerTools)
     val modelManager = ModelManager(
         context,
         mapOf(ModelRole.Planner to plannerEngine, ModelRole.Chat to chatEngine),
+        inferenceDiagnostics,
     )
 }

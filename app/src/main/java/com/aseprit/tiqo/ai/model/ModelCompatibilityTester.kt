@@ -14,11 +14,13 @@ import com.aseprit.tiqo.ai.tools.PlannerToolProtocol
 internal class ModelCompatibilityTester(
     private val engine: LlmEngine,
     timeoutMillis: Long = PLANNER_INFERENCE_TIMEOUT_MILLIS,
+    private val onDiagnosticStage: (String, String?) -> Unit = { _, _ -> },
 ) {
     private val runner = PlannerInferenceRunner(engine, timeoutMillis)
 
     suspend fun testPlanner(): ModelTestState {
         val diagnostics = PLANNER_CASES.map { scenario ->
+            onDiagnosticStage("scenario_${scenario.name}_started", null)
             val inference = runner.run(
                 LlmRequest(
                     messages = listOf(
@@ -27,9 +29,15 @@ internal class ModelCompatibilityTester(
                     ),
                     availableTools = PlannerToolProtocol.definitions,
                     maxOutputTokens = PLANNER_MAX_OUTPUT_TOKENS,
+                    diagnosticTag = "scenario_${scenario.name}",
                 ),
             )
-            diagnosticFor(scenario, inference)
+            val diagnostic = diagnosticFor(scenario, inference)
+            onDiagnosticStage(
+                "scenario_${scenario.name}_completed",
+                "parser=${diagnostic.parserPath} tool=${diagnostic.parsedTool ?: "none"} error=${diagnostic.error ?: "none"}",
+            )
+            diagnostic
         }
         val passed = diagnostics.count { it.error == null }
         val compatibility = when (passed) {

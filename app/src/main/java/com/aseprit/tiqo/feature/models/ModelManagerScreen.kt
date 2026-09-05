@@ -82,6 +82,7 @@ fun ModelManagerScreen(manager: ModelManager, onBack: () -> Unit) {
     val models by manager.models.collectAsStateWithLifecycle()
     val downloads by manager.downloads.collectAsStateWithLifecycle()
     val tests by manager.tests.collectAsStateWithLifecycle()
+    val plannerDiagnostics by manager.plannerDiagnostics.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var showImport by remember { mutableStateOf(false) }
     var pendingImport by remember { mutableStateOf<ImportRequest?>(null) }
@@ -95,6 +96,15 @@ fun ModelManagerScreen(manager: ModelManager, onBack: () -> Unit) {
                     .onSuccess { message = "Model został zaimportowany" }
                     .onFailure { message = it.message }
             }
+        }
+    }
+    val diagnosticExportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            manager.exportPlannerDiagnostics(uri)
+                .onSuccess { message = "Diagnostyka została wyeksportowana" }
+                .onFailure { message = it.message }
         }
     }
 
@@ -130,6 +140,26 @@ fun ModelManagerScreen(manager: ModelManager, onBack: () -> Unit) {
         message?.let {
             GlassSurface(Modifier.fillMaxWidth(), cornerRadius = 16.dp) {
                 Text(it, Modifier.padding(14.dp), color = if (it.startsWith("Model został")) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
+            }
+        }
+        plannerDiagnostics?.let { report ->
+            GlassSurface(Modifier.fillMaxWidth(), cornerRadius = 16.dp) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Diagnostyka Planner self-testu", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Po zniknięciu procesu uruchom Tiqo ponownie, wróć tutaj i wyeksportuj ten plik. Wyślij go razem z wynikiem „adb shell dumpsys activity exit-info com.aseprit.tiqo”.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Text(
+                        report.lineSequence().toList().takeLast(3).joinToString("\n"),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedButton(onClick = { diagnosticExportLauncher.launch("tiqo-planner-diagnostics.txt") }) {
+                        Text("Eksportuj diagnostykę")
+                    }
+                }
             }
         }
 

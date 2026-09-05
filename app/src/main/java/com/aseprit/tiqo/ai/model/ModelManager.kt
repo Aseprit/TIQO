@@ -3,6 +3,7 @@ package com.aseprit.tiqo.ai.model
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import com.aseprit.tiqo.ai.InferenceDiagnostics
 import com.aseprit.tiqo.ai.LlmEngine
 import com.aseprit.tiqo.ai.LlamaCppEngine
 import com.google.gson.Gson
@@ -106,6 +107,7 @@ data class ModelTestState(
 class ModelManager(
     private val context: Context,
     private val engines: Map<ModelRole, LlmEngine>,
+    private val inferenceDiagnostics: InferenceDiagnostics = InferenceDiagnostics(context),
 ) {
     private val modelDirectory = File(context.filesDir, "models")
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -123,6 +125,9 @@ class ModelManager(
     val models: StateFlow<List<InstalledModelState>> = mutableModels.asStateFlow()
     val downloads: StateFlow<Map<String, ModelDownloadState>> = mutableDownloads.asStateFlow()
     val tests: StateFlow<Map<String, ModelTestState>> = mutableTests.asStateFlow()
+    val plannerDiagnostics: StateFlow<String?> = inferenceDiagnostics.report
+
+    fun exportPlannerDiagnostics(target: Uri): Result<Unit> = inferenceDiagnostics.export(target)
 
     suspend fun importModel(modelId: String, source: Uri): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
@@ -318,14 +323,19 @@ class ModelManager(
         val previousId = loadedModelIds[role]
         mutableTests.value = mutableTests.value + (modelId to ModelTestState(ModelTestStatus.Running))
         var loadMillis: Long? = null
+        if (role == ModelRole.Planner) beginPlannerDiagnostics(entry, "manual_test")
         val result = runCatching {
             if (previousId != modelId || !engine.isLoaded.value) {
+                if (role == ModelRole.Planner) inferenceDiagnostics.record("before_model_load")
                 unloadRole(role)
                 loadMillis = measureTimeMillis { engine.load(path).getOrThrow() }
                 loadedModelIds[role] = modelId
+                if (role == ModelRole.Planner) inferenceDiagnostics.record("after_model_load", "loadMs=$loadMillis")
+            } else if (role == ModelRole.Planner) {
+                inferenceDiagnostics.record("reusing_loaded_model")
             }
             val plannerTest = role == ModelRole.Planner
-            val tested = if (plannerTest) ModelCompatibilityTester(engine).testPlanner()
+            val tested = if (plannerTest) plannerTester(engine).testPlanner()
             else ModelCompatibilityTester(engine).testChat()
             tested.copy(loadTimeMillis = loadMillis)
         }
@@ -335,6 +345,9 @@ class ModelManager(
         }
         val state = result.getOrElse { error ->
             ModelTestState(ModelTestStatus.Failed, loadTimeMillis = loadMillis, error = error.message ?: "Test nie powiódł się")
+        }
+        if (role == ModelRole.Planner) {
+            inferenceDiagnostics.complete("status=${state.status} error=${state.error ?: "none"}")
         }
         mutableTests.value = mutableTests.value + (modelId to state)
         refresh()
@@ -354,12 +367,21 @@ class ModelManager(
         if (role !in entry.roles) return Result.failure(IllegalArgumentException("Model nie obsługuje tej roli"))
         val path = modelPath(modelId) ?: return Result.failure(IllegalStateException("Model nie jest zainstalowany"))
         val engine = engines[role] ?: return Result.failure(IllegalStateException("Brak silnika dla roli $role"))
+        if (role == ModelRole.Planner) {
+            beginPlannerDiagnostics(entry, "activation_or_load")
+            inferenceDiagnostics.record("before_model_load")
+        }
         unloadRole(role)
         val result = engine.load(path)
-        if (result.isFailure) return result
+        if (result.isFailure) {
+            if (role == ModelRole.Planner) inferenceDiagnostics.complete("status=load_failed error=${result.exceptionOrNull()?.message}")
+            return result
+        }
         if (role == ModelRole.Planner) {
-            val testState = ModelCompatibilityTester(engine).testPlanner()
+            inferenceDiagnostics.record("after_model_load")
+            val testState = plannerTester(engine).testPlanner()
             mutableTests.value = mutableTests.value + (modelId to testState)
+            inferenceDiagnostics.complete("status=${testState.status} error=${testState.error ?: "none"}")
             if (testState.plannerCompatibility != PlannerCompatibilityStatus.Compatible) {
                 engine.unload()
                 return Result.failure(
@@ -371,6 +393,19 @@ class ModelManager(
         }
         loadedModelIds[role] = modelId
         return Result.success(Unit)
+    }
+
+    private fun plannerTester(engine: LlmEngine): ModelCompatibilityTester =
+        ModelCompatibilityTester(engine, onDiagnosticStage = inferenceDiagnostics::record)
+
+    private fun beginPlannerDiagnostics(entry: ModelCatalogEntry, trigger: String) {
+        inferenceDiagnostics.begin(
+            modelId = entry.id,
+            displayName = entry.displayName,
+            storedFileName = entry.fileName,
+            contextTokens = entry.contextTokens,
+            trigger = trigger,
+        )
     }
 
     private fun scheduleUnload(role: ModelRole, delayMillis: Long) {

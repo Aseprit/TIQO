@@ -41,6 +41,8 @@ data class LlmRequest(
     val sessionId: String? = null,
     /** Per-request generation budget. Planner calls should be much shorter than chat replies. */
     val maxOutputTokens: Int = DEFAULT_CHAT_MAX_OUTPUT_TOKENS,
+    /** Enables crash-resilient native-stage breadcrumbs for an explicitly diagnosed request. */
+    val diagnosticTag: String? = null,
 )
 
 const val DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 512
