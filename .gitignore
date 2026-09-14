@@ -26,3 +26,18 @@ ai/benchmark/results/
 /work/
 __pycache__/
 *.pyc
+
+/build-logs/
+
+# Local diagnostics, build artifacts and credentials
+*.apk
+*.aab
+*.log
+*Tiqo-diagnostics*.zip
+*diagnostic*.zip
+/outputs/
+/diagnostics/
+.env
+.env.*
+*.pem
+*.key

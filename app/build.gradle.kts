@@ -8,18 +8,31 @@ plugins {
 android {
     namespace = "com.aseprit.tiqo"
     compileSdk = 35
+    ndkVersion = "29.0.14206865"
+    sourceSets {
+        getByName("main").java.setSrcDirs(listOf("src/foundation/java"))
+        getByName("test").java.setSrcDirs(listOf("src/foundationTest/java"))
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.31.6"
+        }
+    }
 
     defaultConfig {
         applicationId = "com.aseprit.tiqo"
         minSdk = 26
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         targetSdk = 35
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "0.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
 
+    testOptions { unitTests.isIncludeAndroidResources = true }
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -65,9 +78,6 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.litertlm.android)
-    // LiteRT-LM's Conversation callbackFlow bytecode requires the interface-default
-    // bridges shipped by coroutines 1.11.0 (google-ai-edge/LiteRT-LM#2812).
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.gson)
 
@@ -75,6 +85,10 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     testImplementation(libs.junit)
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     testImplementation(libs.kotlinx.coroutines.test)
 }
 

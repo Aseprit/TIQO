@@ -1,88 +1,204 @@
-# Tiqo
+# Tiqo — minimal local foundation
 
-Tiqo to lokalny, natywny planner na Androida z polskim interfejsem, spokojnym glassmorphism UI i opcjonalną warstwą lokalnego AI. Planner działa w pełni bez modelu i bez połączenia z siecią.
+Android 8+ / Kotlin / Compose / Room / llama.cpp JNI. This version implements only Tasks,
+a day screen and a local advisor chat with explicitly approved proposals.
 
-## Stan projektu — 0.4.0
+## Build
 
-W aplikacji działają:
-
-- Home z wyborem dnia i tygodnia oraz wspólną listą tasków, wydarzeń i urodzin,
-- trwałe dane Room/SQLite i ustawienia DataStore,
-- taski jednorazowe, codzienne, tygodniowe, w wybrane dni, miesięczne i coroczne,
-- completion zapisane osobno dla każdego wystąpienia cyklicznego taska,
-- tworzenie i edycja typu, opisu, daty, godziny, trybu całodziennego, przypomnienia i recurrence,
-- long press ze szczegółami, edycją i potwierdzeniem usunięcia,
-- odhaczanie z animacją, haptic feedback i działającym Undo,
-- prawdziwy kalendarz miesięczny z agendą i wskaźnikami dni,
-- statystyki tygodniowe liczone wyłącznie z tasków,
-- dark/light/system theme, siedem kolorów akcentu i intensywność szkła,
-- lokalne powiadomienia z akcją „Gotowe”, obsługa restartu, czasu i strefy czasowej,
-- jedna trwała bieżąca rozmowa, resetowana razem z runtime/KV przez „Nowa rozmowa”,
-- manualny agent LiteRT-LM: 10 walidowanych narzędzi → Room → reminder → structured result → Undo,
-- osobne lokalne modele planner/chat, routing, streaming i rzeczywiste zatrzymanie generowania,
-- trwały katalog własnych modeli z importem systemowym, rolami Planner/Chat, aktywnym wyborem, load/unload/delete i testem na urządzeniu,
-- katalog rekomendowanych gotowych pakietów z kontrolowanym pobieraniem, progressem, anulowaniem i SHA-256,
-- polski benchmark `planner-pl-v1`, powtarzalny SFT i pipeline konwersji `.litertlm`.
-
-## Uruchomienie
-
-Wymagania:
-
-- JDK 17,
-- Android SDK 35,
-- Android Studio lub terminal,
-- urządzenie/emulator z Androidem 8.0 (API 26) lub nowszym.
-
-Otwórz repozytorium w Android Studio, zsynchronizuj Gradle i uruchom konfigurację `app`.
-
-Debug APK można zbudować w PowerShellu:
-
-```powershell
-.\gradlew.bat :app:assembleDebug
+```sh
+git clone --recurse-submodules https://github.com/Aseprit/Tiqo.git
+cd Tiqo
+git submodule update --init --recursive
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
 
-Artefakt powstaje jako `app/build/outputs/apk/debug/app-debug.apk`.
+Use JDK 17, Android SDK 35, NDK 29.0.14206865 and CMake 3.31.6. Set `sdk.dir` in
+`local.properties` or `ANDROID_HOME`. On Windows use `gradlew.bat` and Git long-path
+support (`git -c core.longpaths=true submodule update --init --recursive`). ARM64 and
+x86_64 JNI libraries are compiled from the pinned llama.cpp submodule. The initial
+native build takes longer than subsequent builds. No model download happens in the app.
 
-Kontrola jakości:
+## Use
 
-```powershell
-.\gradlew.bat test
-.\gradlew.bat :app:lintDebug
+1. In **Dzień**, select a date (ISO or previous/next day). Add, edit, delete or check Tasks.
+   Manually created Tasks are locked. Changes are persisted in Room immediately.
+2. In **Chat AI**, choose **Importuj GGUF** and select a local instruction/chat model.
+   The app checks GGUF magic and atomically imports it into private persistent storage.
+   Bonsai 8B Q1_0 is the preferred test model:
+   https://huggingface.co/prism-ml/Bonsai-8B-gguf (file `Bonsai-8B-Q1_0.gguf`).
+3. After a process restart choose **Załaduj zapisany**. **Zwolnij model** releases RAM;
+   the imported file stays on disk. Stop and app backgrounding cancel generation.
+4. Ask `co mam jutro?`, `co mam w tym tygodniu?`, or request a Task change.
+   Advisor text streams as it is generated. Actions appear only after complete JSON
+   has passed validation. Review the old/new values and approve or reject.
+
+## Data and authorization
+
+`TaskDatabase` uses the existing `tiqo.db` filename, schema version 3 (migrates both the upstream v1 and the previously tested local v2). Tasks have exactly
+id, title, date (epoch day), completed, locked and createdAt (epoch milliseconds).
+Room is the only source of planner state. Home observes a Room Flow; every chat request
+queries Room again through `ContextBuilder`. Chat history is display-only and is never
+used as planner memory. It survives rotation in the ViewModel, not process death.
+
+The context resolver supports Polish/English today, tomorrow, Polish day after tomorrow,
+yesterday, current/next week and ISO dates. Ambiguous queries receive a bounded seven-day
+snapshot with explicit dates. It does not silently imply complete knowledge outside that
+range. More than 80 Tasks or a prompt exceeding the 4096-token native context is rejected
+with an instruction to narrow the query. Cross-date move requests include source/target
+ranges. Arbitrary natural-language dates and pronoun resolution are not implemented.
+
+Flow: fresh Room snapshot -> one constrained JSON generation -> semantic validation ->
+proposal card -> explicit approval -> Kotlin transaction -> Room. No agent loop, direct
+model writes, tool side effects or cloud. Grammar constrains syntax; Kotlin validates IDs,
+action shapes, dates, title bounds and duplicate targets. Approval rereads the full queried
+range inside the transaction and refuses stale proposals before any write. AI-created
+Tasks have locked=false. A locked Task can be changed only by a manual edit or explicit
+approval of the displayed proposal; approval preserves the lock.
+
+## Existing repository audit
+
+Starting revision: d1f2c412ae218542860b576c00c8952967cef7bb.
+Retained: Android application identity and SDK baseline, Gradle wrapper/version catalog,
+Compose/Room infrastructure, launcher resources, database filename and migration source
+schema. Replaced: multi-kind planner domain, automatic tool execution and the unavailable
+GGUF placeholder. The new application source set is `app/src/foundation/java`; tests are
+`app/src/foundationTest/java`. Old `src/main/java` and `src/test/java` files are retained
+for recoverable comparison and excluded from compilation. They are not shipped behavior.
+The old AI training/benchmark material is also historical, not part of the APK.
+
+Migration copies existing one-off TASK/NONE rows with original IDs, titles, dates,
+creation times and completion states. Legacy event/recurrence/chat tables remain untouched
+in existing databases to avoid data loss; no UI or runtime code implements these features.
+No destructive fallback is enabled. Notification permissions and receivers were removed
+from the active manifest. Navigation, statistics, reminders, speech and LiteRT are absent
+from the new runtime.
+
+## Inference and licensing
+
+`LocalInference` is the replaceable engine contract. `LlamaCppEngine` owns one serialized
+native session on a dedicated thread, with a mutex covering load/generation/free. JNI
+keeps model/context/sampler resources together, clears KV memory between requests, checks
+context capacity, reports native failures and uses an atomic cancellation flag during
+decode. Token pieces cross JNI as bytes to preserve UTF-8 boundaries. Model templates
+come from GGUF metadata; unsupported architectures/templates fail explicitly. The MVP
+uses CPU inference and does not promise compatibility with every GGUF or device RAM size.
+
+ToolNeuron was reviewed as the requested reference, specifically its generation callbacks,
+load/unload and teardown patterns. Its current native GGUF layer is a prebuilt AAR, so this
+project builds its own small JNI adapter against upstream sources instead of shipping an
+opaque binary. Provenance and full licenses are in `THIRD_PARTY_NOTICES.md` and APK assets.
+No model weights are included in source or APK.
+
+## Verification
+
+Unit/integration tests use Robolectric and real Room: manual CRUD, fresh snapshots, file
+persistence across reopen, migration, explicit approval, stale proposal rejection without
+partial writes, invalid IDs/dates and bounded context. Native instrumentation is opt-in:
+
+```sh
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+# Import a model through the app first, then:
+adb shell am instrument -w -e modelPath /data/user/0/com.aseprit.tiqo/files/gguf/model.gguf com.aseprit.tiqo.test/androidx.test.runner.AndroidJUnitRunner
 ```
 
-## Przypomnienia
+Without `modelPath`, the native test is skipped, not reported as verified inference.
+See the session verification report for commands actually run and any remaining limits.
 
-Tiqo prosi o zgodę na powiadomienia na Androidzie 13+. Gdy system zezwala na dokładne alarmy, używa dokładnego `AlarmManager`; bez tego dostępu bezpiecznie przechodzi na alarm niedokładny i pokazuje status oraz odnośnik do ustawień systemowych. Dla serii planowane jest tylko najbliższe wystąpienie, a po jego obsłużeniu kolejne.
+## Bonsai verification and limits (2026-09-13)
 
-## Lokalne AI
+The native instrumentation uses real Bonsai 8B Q1_0 through the production JNI/grammar,
+with a separate on-disk Room database. It checks COMPLETE, UPDATE, MOVE and CREATE in
+sequence, exact full-record differences after approval, no writes before approval,
+lock preservation, an unrelated Task, unknown-ID rejection and fresh Room snapshots.
+The final model query asks about the newly changed day and must return no actions.
+Without `modelPath` the test skips; a skipped test does not verify inference.
 
-`LlmEngine` oddziela Compose, dane planera i konkretny runtime. Implementacja LiteRT-LM korzysta z manualnego tool callingu: runtime nigdy nie wykonuje funkcji sam. Tiqo odczytuje call, waliduje allow-listę i argumenty, blokuje nieznane identyfikatory, a dopiero potem używa wspólnego repozytorium Room. Planner pozostaje ciepły przez pięć minut tła, większy chat przez minutę; oba są zwalniane pod presją pamięci.
+The raw transcript includes system instructions, grammar, snapshots, formatted JNI input
+and generated output, in `files/inference-test-transcript.txt`. It contains only fixtures.
+Test and UI share prompt assembly; ordinary user chats do not log prompts.
 
-Modele nie są dołączone do repozytorium. Użytkownik może zaimportować gotowy pakiet `.litertlm`, nadać mu rolę Planner, Chat albo obie, a następnie aktywować i przetestować go bez modyfikowania danych planera. Przypisanie roli Planner wymaga przejścia izolowanego self-testu create/delegate/clarification. Katalog zawiera przypięte i weryfikowane SHA-256 artefakty Qwen3 0.6B No-think (small/experimental), Qwen3 1.7B Dynamic INT4 (Chat candidate) oraz większą alternatywę Qwen 2.5 1.5B Q8. Pobieranie zachowuje `.partial` i wznawia transfer przez HTTP Range.
+The investigation found three distinct issues:
+- llama.cpp's built-in ChatML formatter omitted Bonsai's static empty-think suffix from
+  its GGUF template. JNI now preserves that suffix when declared by template content;
+  instrumentation compares the actual formatted UTF-8 input with the expected template.
+- The generic action grammar allowed populated fields that the semantic validator rejected.
+  Separate action rules now enforce the same field/null contract shown below.
+- Bonsai misinterpreted locked/completed flags, refused a new Task absent from the snapshot,
+  confused COMPLETE with UPDATE, and proposed a redundant action on a state question.
+  The system prompt now has explicit action-selection rules, permitted flag semantics and
+  a final distinction between read-only questions and change requests. No Kotlin intent
+  fallback, action repair or automatic execution was added.
 
-Obecny wykonujący backend to LiteRT-LM 0.16.1 na CPU i obsługuje gotowe pakiety `.litertlm`. `.gguf` jest poprawnie rozpoznawany jako backend llama.cpp, lecz obecny APK nie zawiera jeszcze zweryfikowanego modułu JNI i odrzuca import z jawnym komunikatem. Sama końcówka pliku nie gwarantuje zgodności checkpointu; prawdziwą weryfikacją jest inicjalizacja runtime i test modelu. Szczegóły: [docs/MODEL_COMPATIBILITY.md](docs/MODEL_COMPATIBILITY.md).
+| Action | taskId | title | date |
+| --- | --- | --- | --- |
+| CREATE_TASK | null | string | YYYY-MM-DD |
+| UPDATE_TASK | existing ID | string | null |
+| MOVE_TASK | existing ID | null | YYYY-MM-DD |
+| COMPLETE_TASK | existing ID | null | null |
 
-## Architektura
+The validator additionally checks snapshot membership, real dates (1900–2200), nonblank
+bounded titles/opinion, at most eight actions and no duplicate target IDs. Approval checks
+freshness transactionally. Grammar constrains structure, not these semantic rules or the
+quality of the model's recommendation. Passing the fixture suite does not guarantee correct
+behavior for all natural-language requests; user review remains essential.
 
-```text
-Compose → ViewModel/Flow → domain contracts → Room/DataStore
-                           ↑
-PlannerTools → validation ┘
+MVP limits: CPU only, context 4096 tokens and output 1024 tokens; at most 80 Tasks per
+snapshot. Templates use a finite llama.cpp C API implementation, not arbitrary Jinja.
+Model import is required; weights are not bundled. Real runtime verification uses an API35
+x86_64 emulator; ARM64 is compiled but has not been tested on a phone. CPU emulator timings
+are not device performance measurements. Bonsai can produce awkward Polish and inaccurate
+reasoning. Chat is transient, date parsing is intentionally bounded, and no future-phase
+features are implemented. Legacy sources/resources are retained; lint warnings concern
+unused legacy resources and dependency/catalog updates.
 
-Chat UI → aktywny Planner model → ToolCall → Validator → PlannerTools → Room
-                           └→ delegate_to_chat → aktywny lokalny Chat model
-```
+Final verification: 11 Robolectric/Room tests passed (0 skipped/failures/errors), lintDebug
+completed with 0 errors / 146 warnings, debug and instrumentation APK builds succeeded.
+The real Bonsai instrumentation passed all four actions and the final state-query check:
+`OK (1 test)`, 617.601 seconds, API35 x86_64. The final prompt included the fresh moved and
+created Tasks and returned `actions:[]`. Its opinion was generic rather than listing Tasks;
+this test verifies fresh input and absence of mutations, not semantic answer quality.
 
-Projekt pozostaje jednym modułem Gradle, ale pakiety oddzielają `feature`, `domain`, `data`, `notification`, `core/designsystem` i `ai`. Room jest jednym źródłem prawdy dla Home, Calendar, Statistics, reminders i tool calls. Szczegóły: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) i [docs/AI_ARCHITECTURE.md](docs/AI_ARCHITECTURE.md).
+## AI diagnostics
 
-## Prywatność i repozytorium
+Settings → AI Diagnostics → export ZIP after reproducing a slow request (or pressing Stop).
+The export warns about prompt/task content. It allowlists diagnostic text/JSON files only;
+GGUF, credentials, app preferences and databases are not exported. Keep the ZIP private.
+The last three sessions are retained; each artifact is capped at 256 KiB and session logs
+rotate at 256 KiB with one previous segment. Native logging has a bounded queue and reports
+dropped records. An export includes the current session plus up to two older sessions.
 
-Dane planera, historia czatu i modele pozostają lokalnie na urządzeniu. `.gitignore` wyklucza `local.properties`, keystore'y, modele, pliki częściowe i artefakty builda. Repozytorium nie zawiera tokenów ani kluczy podpisujących.
+One request ID connects UI, Room/context, formatted prompt, tokenization, native prefill,
+generation and parsing. Model/config artifacts link back to the model-load session.
+Monotonic timestamps, prefill X/Y (completed batches), throughput and first-token latency
+help distinguish slow evaluation from decoding failure. Progress can remain at X while a
+single llama_decode batch runs. Cancellation records the interrupted stage and stays
+CANCELLED even when the abort callback makes decode return an error. No inference parameters
+were tuned as part of this diagnostic change. Physical-device latency still needs a ZIP
+from the affected phone; unit tests cannot establish its cause.
 
-## Roadmapa
+Windows: `./scripts/build-debug.ps1` saves full Gradle output under `build-logs/` and copies
+a successful debug APK to `S:\Tiqo\builds\Tiqo-debug.apk`. If the drive is unavailable, the
+normal `app/build/outputs/apk/debug/app-debug.apk` remains available.
 
-Bieżący stan i kolejne kroki opisuje [ROADMAP.md](ROADMAP.md).
+## Adreno OpenCL backend
 
-## Licencja
+ARM64 builds enable upstream GGML_OPENCL, embedded kernels and Adreno kernels; binary
+kernel packs remain disabled. Q1_0 has upstream Adreno and generic OpenCL matmul paths.
+Reference: https://github.com/ggml-org/llama.cpp/blob/master/docs/backend/OPENCL.md
+The bundled Khronos ICD loader dispatches to the phone's optional libOpenCL.so, discovered
+via dlopen and ICD platform enumeration. No Qualcomm driver binary is shipped.
 
-Licencja kodu projektu nie została jeszcze wybrana. Do czasu jej dodania obowiązują prawa autorskie właściciela repozytorium. Modele mają własne, niezależne warunki licencyjne.
+JNI selects an upstream OpenCL Adreno GPU and requests n_gpu_layers=-1 (all eligible
+layers). Configuration logs include openclFound, device, backend, requested n_gpu_layers,
+actual offloadedLayers (from llama.cpp), and fallbackReason. BACKEND_DETECTED and
+DEVICE_DETECTED enumerate registered backends/devices. Missing vendor/ICD/platform/device
+falls back to CPU with an explicit reason; GPU model/context load failure stops with an
+error instead of silently retrying CPU. A selected GPU with zero offloaded layers is rejected.
+CPU operators may still be used where the upstream scheduler requires them.
+
+The Nothing A059 CPU baseline ZIP showed 671 prompt tokens, 239624 ms prefill (2.800 tok/s),
+1.989 generation tok/s, 258434 ms end-to-end and 1652 ms load. This change alters only backend
+selection/offload, not the model, quantization, prompt, context, threads or batch sizes.
+Physical Adreno performance must be measured by the user; no long local inference was run.
