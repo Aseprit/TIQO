@@ -23,7 +23,13 @@ class LlamaCppEngine(private val diagnostics: AiDiagnostics? = null) : LocalInfe
     private var handle = 0L
     private val handleLock = Any()
     @Volatile private var stopped = false
-    private val library by lazy { System.loadLibrary("tiqo_llama") }
+    private val library by lazy {
+        try { System.loadLibrary("tiqo_llama") }
+        catch (e: UnsatisfiedLinkError) {
+            diagnostics?.event("OPENCL_LINK_ERROR", "Vendor runtime or JNI dependency unavailable: ${e.message}")
+            throw IllegalStateException("Nie można załadować bibliotek inference: ${e.message}", e)
+        }
+    }
 
     override suspend fun load(path: String) = withContext(dispatcher) {
         mutex.withLock {

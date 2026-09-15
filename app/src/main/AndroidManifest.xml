@@ -3,6 +3,7 @@
     <application android:allowBackup="true" android:icon="@drawable/ic_launcher"
         android:label="@string/app_name" android:supportsRtl="true" android:theme="@style/Theme.Tiqo">
         <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL_adreno.so" android:required="false" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

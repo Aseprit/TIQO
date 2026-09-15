@@ -23,12 +23,15 @@ if(ANDROID_ABI STREQUAL "x86_64")
 endif()
 if(ANDROID_ABI STREQUAL "arm64-v8a")
     set(OPENCL_ICD_LOADER_HEADERS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../vendor/OpenCL-Headers" CACHE PATH "" FORCE)
-    set(OPENCL_ICD_LOADER_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(OPENCL_ICD_LOADER_BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
+    set(ENABLE_OPENCL_LOADER_MANAGED_DISPATCH OFF CACHE BOOL "" FORCE)
     set(ENABLE_OPENCL_LAYERS OFF CACHE BOOL "" FORCE)
     set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
     add_subdirectory(../../../../vendor/OpenCL-ICD-Loader ${CMAKE_CURRENT_BINARY_DIR}/opencl-loader)
-    # Static upstream loader dispatches to the phone's vendor driver; never ship a vendor .so.
-    set_target_properties(OpenCL PROPERTIES C_VISIBILITY_PRESET hidden)
+    # Link-time ABI library only (as in upstream's Android sysroot setup).
+    # Gradle excludes it from the APK: Android resolves libOpenCL.so to the vendor runtime.
+    # Do not impose desktop loader SONAME/symbol versions on Android's vendor ABI.
+    set_target_properties(OpenCL PROPERTIES VERSION "" SOVERSION "" LINK_FLAGS "")
     set(OpenCL_INCLUDE_DIR "${OPENCL_ICD_LOADER_HEADERS_DIR}" CACHE PATH "" FORCE)
     set(OpenCL_LIBRARY OpenCL CACHE STRING "" FORCE)
     set(GGML_OPENCL ON CACHE BOOL "" FORCE)

@@ -187,8 +187,9 @@ normal `app/build/outputs/apk/debug/app-debug.apk` remains available.
 ARM64 builds enable upstream GGML_OPENCL, embedded kernels and Adreno kernels; binary
 kernel packs remain disabled. Q1_0 has upstream Adreno and generic OpenCL matmul paths.
 Reference: https://github.com/ggml-org/llama.cpp/blob/master/docs/backend/OPENCL.md
-The bundled Khronos ICD loader dispatches to the phone's optional libOpenCL.so, discovered
-via dlopen and ICD platform enumeration. No Qualcomm driver binary is shipped.
+Khronos builds a shared link-time libOpenCL.so, excluded from the APK. Android resolves
+the dependency to the phone vendor runtime; standard clGetPlatformIDs/clGetDeviceIDs
+enumerate platforms/devices without requiring cl_khr_icd. No vendor binary is shipped.
 
 JNI selects an upstream OpenCL Adreno GPU and requests n_gpu_layers=-1 (all eligible
 layers). Configuration logs include openclFound, device, backend, requested n_gpu_layers,
@@ -202,3 +203,13 @@ The Nothing A059 CPU baseline ZIP showed 671 prompt tokens, 239624 ms prefill (2
 1.989 generation tok/s, 258434 ms end-to-end and 1652 ms load. This change alters only backend
 selection/offload, not the model, quantization, prompt, context, threads or batch sizes.
 Physical Adreno performance must be measured by the user; no long local inference was run.
+
+Loader correction: the previous static Khronos ICD loader and Tiqo preflight both required
+clIcdGetPlatformIDsKHR. That establishes ICD compatibility, not availability of a standard
+vendor OpenCL implementation. The shared Khronos library now serves only as a link-time ABI
+library, with DT_NEEDED libOpenCL.so resolved by Android to the vendor runtime. The APK must
+not package libOpenCL.so. Diagnostics distinguish loader role, resolved vendor symbol path,
+loadable/inaccessible library candidates (including libOpenCL_adreno.so), platform/device
+query return codes and counts. A missing ARM64 vendor dependency produces OPENCL_LINK_ERROR,
+not a crash or a claim of GPU availability. Device detection/performance still requires the
+phone test; no phone was attached during this change.

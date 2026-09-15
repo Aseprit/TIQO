@@ -45,26 +45,44 @@ void diagnostic(const std::string &stage, std::string message = "") {
 }
 void discover_opencl() {
 #ifdef TIQO_OPENCL
-    std::string errors;
-    bool loaded = false;
-    for (const char *path : {"libOpenCL.so", "/vendor/lib64/libOpenCL.so", "/system/vendor/lib64/libOpenCL.so"}) {
+    diagnostic("OPENCL_LOADER", "Khronos ICD=link-time only, excluded from APK; runtime=vendor standard OpenCL API (no ICD requirement)");
+    Dl_info info = {};
+    if (dladdr(reinterpret_cast<void *>(&clGetPlatformIDs), &info))
+        diagnostic("OPENCL_RUNTIME", std::string("clGetPlatformIDs resolved from=") + (info.dli_fname ? info.dli_fname : "unknown"));
+    for (const char *path : {"libOpenCL.so", "/vendor/lib64/libOpenCL.so", "libOpenCL_adreno.so", "/vendor/lib64/libOpenCL_adreno.so"}) {
         void *lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-        if (!lib) { const char *e = dlerror(); errors += std::string(path) + ": " + (e ? e : "dlopen failed") + "; "; continue; }
-        // Retain the vendor handle for the lifetime of the process. The upstream ICD loader owns dispatch.
-        auto extension = reinterpret_cast<void *(*)(const char *)>(dlsym(lib, "clGetExtensionFunctionAddress"));
-        if (!extension || !extension("clIcdGetPlatformIDsKHR")) {
-            errors += std::string(path) + ": missing clIcdGetPlatformIDsKHR; "; dlclose(lib); continue;
-        }
-        setenv("OCL_ICD_FILENAMES", path, 1);
-        diagnostic("OPENCL_RUNTIME", std::string("vendorLibrary=") + path);
-        loaded = true; break;
+        if (lib) { diagnostic("OPENCL_LIBRARY", std::string(path) + " loadable (not a GPU success criterion)"); dlclose(lib); }
+        else { const char *e = dlerror(); diagnostic("OPENCL_LIBRARY", std::string(path) + " unavailable/inaccessible: " + (e ? e : "unknown")); }
     }
-    if (!loaded) { opencl_reason = "Vendor runtime unavailable: " + errors; return; }
     cl_uint platforms = 0;
     const cl_int rc = clGetPlatformIDs(0, nullptr, &platforms);
-    diagnostic("OPENCL_PLATFORMS", "rc=" + std::to_string(rc) + " count=" + std::to_string(platforms));
+    diagnostic("OPENCL_PLATFORMS", "vendor clGetPlatformIDs rc=" + std::to_string(rc) + " count=" + std::to_string(platforms));
     opencl_found = rc == CL_SUCCESS && platforms > 0;
-    if (!opencl_found) opencl_reason = "Khronos loader clGetPlatformIDs rc=" + std::to_string(rc) + " platforms=" + std::to_string(platforms);
+    if (!opencl_found) { opencl_reason = "Vendor clGetPlatformIDs rc=" + std::to_string(rc) + " platforms=" + std::to_string(platforms); return; }
+    std::vector<cl_platform_id> ids(platforms);
+    const cl_int list_rc = clGetPlatformIDs(platforms, ids.data(), nullptr);
+    if (list_rc != CL_SUCCESS) { opencl_found = false; opencl_reason = "Vendor platform enumeration rc=" + std::to_string(list_rc); return; }
+    cl_uint total_devices = 0;
+    for (auto platform : ids) {
+        char platform_name[1024] = {};
+        const cl_int platform_name_rc = clGetPlatformInfo(platform, CL_PLATFORM_NAME, sizeof(platform_name), platform_name, nullptr);
+        diagnostic("OPENCL_PLATFORM", "name_rc=" + std::to_string(platform_name_rc) + " name=" + platform_name);
+        cl_uint count = 0;
+        const cl_int device_rc = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, 0, nullptr, &count);
+        diagnostic("OPENCL_DEVICES", "clGetDeviceIDs rc=" + std::to_string(device_rc) + " count=" + std::to_string(count));
+        if (device_rc != CL_SUCCESS || count == 0) continue;
+        std::vector<cl_device_id> devices(count);
+        const cl_int devices_rc = clGetDeviceIDs(platform, CL_DEVICE_TYPE_ALL, count, devices.data(), nullptr);
+        if (devices_rc != CL_SUCCESS) { diagnostic("OPENCL_DEVICES", "enumeration rc=" + std::to_string(devices_rc)); continue; }
+        total_devices += count;
+        for (auto device : devices) {
+            char name[1024] = {};
+            const cl_int name_rc = clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(name), name, nullptr);
+            diagnostic("OPENCL_DEVICE", "name_rc=" + std::to_string(name_rc) + " name=" + name);
+        }
+    }
+    diagnostic("OPENCL_ENUMERATION", "platforms=" + std::to_string(platforms) + " devices=" + std::to_string(total_devices));
+    if (total_devices == 0) { opencl_found = false; opencl_reason = "Vendor OpenCL platforms found but no devices enumerated; see OPENCL_DEVICES rc"; }
 #else
     opencl_reason = "OpenCL not compiled for this ABI (arm64-v8a required)";
 #endif
