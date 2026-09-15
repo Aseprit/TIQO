@@ -10,14 +10,17 @@ import java.time.LocalDate
 
 data class ChatLine(val role: String, val text: String)
 
-class MainViewModel(application: Application) : AndroidViewModel(application) {
+class MainViewModel internal constructor(application: Application, normalizer: CreateTitleNormalizer?) : AndroidViewModel(application) {
+    constructor(application: Application) : this(application, null)
     private val database = TaskDatabase.open(application)
     private val repository = TaskRepository(database)
     private val builder = ContextBuilder(repository.dao)
     private val readFastPath = PlannerReadFastPath(builder)
+    private val createPipeline = CreateSpecializedPipeline(builder)
     private val executor = ProposalExecutor(repository)
     val diagnostics = AiDiagnostics(application)
     private val engine = LlamaCppEngine(diagnostics)
+    private val titleNormalizer = normalizer ?: CreateTitleNormalizer(engine)
     private val store = ModelStore(application)
     val date = MutableStateFlow(LocalDate.now())
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -90,6 +93,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     diagnostics.stage("DONE", "tasks=${answer.taskCount}")
                     messages.value += ChatLine("Tiqo", answer.text)
                     return@launch
+                }
+                createPipeline.route(query)?.let { request ->
+                    val specialized = createPipeline.generateProposal(request, titleNormalizer, diagnostics)
+                    if (specialized != null) {
+                        diagnostics.stage("DONE", "actions=1 specialized=CREATE_TASK")
+                        messages.value += ChatLine("Tiqo", specialized.opinion)
+                        proposal.value = specialized
+                        return@launch
+                    }
+                    diagnostics.event("CREATE_FALLBACK", "invalid normalized title")
                 }
                 val snapshot = builder.build(query, diagnostics)
                 // History is display-only. Every inference gets a fresh Room snapshot.

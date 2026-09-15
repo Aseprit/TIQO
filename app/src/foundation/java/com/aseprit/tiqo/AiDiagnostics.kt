@@ -27,6 +27,7 @@ class AiDiagnostics(private val context: Context, private val root: File = File(
         private set
     private val gson = Gson()
     private val cached = mutableMapOf<String, String>()
+    private var normalizationActive = false
     private val allowed = setOf("session.log", "session.previous.log", "device.json", "model.json", "inference-config.json", "prompt.txt", "planner-snapshot.json", "grammar.json")
     private val terminal = setOf("CANCELLED", "ERROR", "DONE", "READY")
 
@@ -35,6 +36,7 @@ class AiDiagnostics(private val context: Context, private val root: File = File(
         root.listFiles()?.filter { it.isDirectory && it.name.startsWith("session-") }?.maxByOrNull { it.lastModified() }?.let { directory = it }
     }
     @Synchronized fun begin(kind: String) {
+        normalizationActive = false
         val id = UUID.randomUUID().toString()
         state.value = InferenceStatus(id, if (kind == "load") "LOADING" else "PREPARING", started = SystemClock.elapsedRealtime())
         directory = File(root, "session-$id").apply { mkdirs() }
@@ -52,6 +54,8 @@ class AiDiagnostics(private val context: Context, private val root: File = File(
         for (name in listOf("model.json", "inference-config.json")) artifact(name, cached[name] ?: "{\"available\":false}")
         event("UI_REQUEST", kind)
     }
+    @Synchronized fun beginNormalization() { normalizationActive = true }
+    @Synchronized fun endNormalization() { normalizationActive = false }
     @Synchronized fun artifact(name: String, content: String) {
         require(name in allowed)
         if (directory == root) return
@@ -89,6 +93,7 @@ class AiDiagnostics(private val context: Context, private val root: File = File(
             if (parts.size != 4 || parts[0] != state.value.id) return@forEach
             val kind = parts[2]; val payload = parts[3]
             event("NATIVE/$kind", "native_ms=${parts[1]} $payload")
+            if (kind == "TOKENIZED" && normalizationActive) event("NORMALIZATION_PROMPT_TOKENS", payload)
             when (kind) {
                 "TOKENIZING", "EVALUATING", "GENERATING" -> stage(kind, payload)
                 "MODEL", "CONFIG" -> {

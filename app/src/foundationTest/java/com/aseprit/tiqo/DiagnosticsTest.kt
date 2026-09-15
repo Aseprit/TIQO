@@ -18,6 +18,18 @@ class DiagnosticsTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         return AiDiagnostics(context, File(context.cacheDir, "diagnostics-${System.nanoTime()}"))
     }
+    @Test fun specializedTokenCountIsCorrelatedWithNativeTokenizer() {
+        val d = diagnostic()
+        d.begin("request")
+        val id = d.state.value.id
+        d.beginNormalization()
+        d.native("$id\t1\tTOKENIZED\tbytes=180 tokens=43\n")
+        d.endNormalization()
+        d.native("$id\t2\tTOKENIZED\tbytes=2820 tokens=649\n")
+        val log = File(d.directory, "session.log").readText()
+        assertTrue(log.contains("NORMALIZATION_PROMPT_TOKENS bytes=180 tokens=43"))
+        assertEquals(1, Regex("NORMALIZATION_PROMPT_TOKENS").findAll(log).count())
+    }
     @Test fun cancellationIsTerminalAndKeepsTheInterruptedStage() {
         val d = diagnostic()
         d.begin("request")
