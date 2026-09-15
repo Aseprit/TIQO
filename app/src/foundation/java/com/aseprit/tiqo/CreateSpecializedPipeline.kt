@@ -13,33 +13,41 @@ import java.util.Locale
 data class SimpleCreateRequest(val date: LocalDate, val taskText: String, val dateLabel: String)
 
 class CreateSpecializedPipeline(private val builder: ContextBuilder, private val clock: Clock = Clock.systemDefaultZone()) {
-    private val relative = "(?:dziś|dzis|dzisiaj|jutro|pojutrze)"
-    private val weekday = "(?:poniedziałek|wtorek|środę|czwartek|piątek|sobotę|niedzielę)"
-    private val dated = "(?:$relative|$weekday)"
-    private val patterns = listOf(
-        Regex("^dodaj(?: mi)? ($relative) (.+)$", RegexOption.IGNORE_CASE),
-        Regex("^dodaj(?: mi)? zadanie na ($dated):? (.+)$", RegexOption.IGNORE_CASE),
-        Regex("^dodaj(?: mi)? na ($dated) (.+)$", RegexOption.IGNORE_CASE),
-        Regex("^zaplanuj na ($dated) (.+)$", RegexOption.IGNORE_CASE),
-    )
-    private val simpleText = Regex("^[\\p{L}\\p{N}]+(?:[ -][\\p{L}\\p{N}]+)*$")
-    private val unsafeWords = Regex("\\b(?:i|oraz|plus|potem|nastepnie|albo|lub|jesli|czy|co|jak|powinien|powinnam|najwazniejsze|dodaj|zaplanuj|usun|przenies|zmien|ukoncz|kup|zadzwon|wyslij|zrob|oddaj|napisz|idz|dzis|dzisiaj|jutro|pojutrze|poniedzialek|wtorek|srode|czwartek|piatek|sobote|niedziele)\\b")
-    private val smallWords = setOf("u", "do", "na", "w", "z", "ze", "od", "za", "po", "pod", "przed", "mi")
+    private val relativeDates = setOf("dzis", "dzisiaj", "jutro", "pojutrze")
+    private val tokens = Regex("\\S+")
+    // Clause boundaries and another command make a single CREATE unclear; task vocabulary is unrestricted.
+    private val compoundOrDecision = Regex("\\b(?:i|oraz|plus|potem|nastepnie|albo|lub|ale|jesli|zeby|czy|co|jak|powinienem|powinnam)\\b")
+    private val anotherCommand = Regex("\\b(?:dodaj|zaplanuj|przenies|przesun|zmien|usun|ukoncz|skasuj|powiedz|doradz|ocen|rozplanuj)\\b")
     private val weekdayNames = mapOf(
         "poniedzialek" to DayOfWeek.MONDAY, "wtorek" to DayOfWeek.TUESDAY,
         "srode" to DayOfWeek.WEDNESDAY, "czwartek" to DayOfWeek.THURSDAY,
         "piatek" to DayOfWeek.FRIDAY, "sobote" to DayOfWeek.SATURDAY,
         "niedziele" to DayOfWeek.SUNDAY,
     )
+    private val dateWords = relativeDates + weekdayNames.keys
 
     fun route(query: String): SimpleCreateRequest? {
-        val q = query.trim().replace(Regex("\\s+"), " ")
-        val match = patterns.firstNotNullOfOrNull { it.matchEntire(q) } ?: return null
-        val dateText = match.groupValues[1]
-        val taskText = match.groupValues[2].trim()
-        if (!validTaskText(taskText)) return null
+        val q = query.trim()
+        val parts = tokens.findAll(q).toList()
+        if (parts.size < 3) return null
+        fun token(index: Int) = plain(parts[index].value.trim(':', '.', ',', '!', '?'))
+        val command = token(0)
+        if (command != "dodaj" && command != "zaplanuj") return null
+        var index = 1
+        if (command == "dodaj" && index < parts.size && token(index) == "mi") index++
+        if (command == "dodaj" && index < parts.size && token(index) == "zadanie") index++
+        if (index < parts.size && token(index) == "na") index++
+        if (index >= parts.size) return null
+        val dateText = token(index)
+        if (dateText !in dateWords) return null
+        val dateLabel = parts[index].value.trim(':', '.', ',', '!', '?').lowercase(Locale.forLanguageTag("pl-PL"))
+        index++
+        if (index < parts.size && parts[index].value == ":") index++
+        if (index >= parts.size) return null
+        val taskText = q.substring(parts[index].range.first).trim().trimEnd('.', '!', '?').trim()
+        if (!singleTaskStructure(taskText)) return null
         val today = LocalDate.now(clock)
-        val date = weekdayNames[plain(dateText)]?.let { day ->
+        val date = weekdayNames[dateText]?.let { day ->
             if (today.dayOfWeek == day) return null // "na środę" on Wednesday is ambiguous.
             today.with(TemporalAdjusters.next(day))
         } ?: run {
@@ -47,7 +55,7 @@ class CreateSpecializedPipeline(private val builder: ContextBuilder, private val
             if (scope.start != scope.end) return null
             scope.start
         }
-        return SimpleCreateRequest(date, taskText, dateText.lowercase(Locale.forLanguageTag("pl-PL")))
+        return SimpleCreateRequest(date, taskText, dateLabel)
     }
 
     suspend fun snapshot(request: SimpleCreateRequest, diagnostics: AiDiagnostics? = null): PlannerSnapshot =
@@ -74,35 +82,54 @@ class CreateSpecializedPipeline(private val builder: ContextBuilder, private val
         val root = JsonParser.parseString(result).asJsonObject
         require(root.keySet() == setOf("title"))
         val title = root["title"].asString.trim()
-        require(validTaskText(title) && title.length <= 300)
-        val originalTerms = terms(request.taskText)
-        require(originalTerms.isNotEmpty() && terms(title) == originalTerms)
+        require(title.isNotBlank() && title.length <= 300 && !title.any { it.isISOControl() })
+        require(!containsDateWord(title) && relatedTitle(request.taskText, title))
         require(snapshot.start == request.date.toString() && snapshot.end == request.date.toString())
         Proposal("Proponuję dodać „$title” na ${request.dateLabel}.",
             listOf(TaskAction(ActionType.CREATE_TASK, null, title, request.date.toString())), snapshot)
             .also(ProposalParser::validate)
     }.getOrNull()
 
-    private fun validTaskText(text: String): Boolean {
-        val words = plain(text).split(' ')
-        return text.length in 3..120 && simpleText.matches(text) &&
-            words.size in 2..3 && obviousTaskLead(text.substringBefore(' ')) &&
-            !unsafeWords.containsMatchIn(plain(text)) &&
-            words.count { it.length >= 5 && it.endsWith('c') } <= 1
+    private fun singleTaskStructure(text: String): Boolean {
+        if (text.isBlank() || text.length > 300 || text.any { it == ',' || it == ';' || it == '.' || it == '?' || it == '\n' || it == '\r' }) return false
+        val normalized = plain(text)
+        return !compoundOrDecision.containsMatchIn(normalized) &&
+            !anotherCommand.containsMatchIn(normalized) && !containsDateWord(text)
     }
 
-    // Only short, familiar task phrases enter this route. Imperative or compound text stays generic.
-    private fun obviousTaskLead(first: String): Boolean {
-        val word = first.lowercase(Locale.forLanguageTag("pl-PL"))
-        val unaccented = plain(word)
-        return word.endsWith('ć') || word == "wizyta" || word == "wizytę" ||
-            unaccented.endsWith("anie") || unaccented.endsWith("enie")
+    private fun containsDateWord(text: String): Boolean = words(text).any { it in dateWords }
+
+    // Small spelling/inflection edits are allowed in each word, while missing or new words
+    // and changes to numbers or distinct nouns stay in the generic approval pipeline.
+    private fun relatedTitle(original: String, title: String): Boolean {
+        val source = words(original)
+        val remaining = words(title).toMutableList()
+        if (source.isEmpty() || source.size != remaining.size) return false
+        for (word in source) {
+            val match = remaining.indexOfFirst { candidate ->
+                if (word.any(Char::isDigit) || candidate.any(Char::isDigit)) word == candidate
+                else editDistance(word, candidate) <= maxOf(1, maxOf(word.length, candidate.length) / 4)
+            }
+            if (match < 0) return false
+            remaining.removeAt(match)
+        }
+        return true
     }
 
-    // Exact words protect task meaning; only the confirmed visit inflection is normalized here.
-    private fun terms(text: String) = plain(text).split(Regex("[ -]+"))
-        .filter { it.isNotBlank() && it !in smallWords }
-        .map { if (it == "wizyte") "wizyta" else it }.toSet()
+    private fun words(text: String) = plain(text).split(Regex("[^\\p{L}\\p{N}]+"))
+        .filter(String::isNotBlank)
+
+    private fun editDistance(a: String, b: String): Int {
+        var previous = IntArray(b.length + 1) { it }
+        for (i in a.indices) {
+            val current = IntArray(b.length + 1)
+            current[0] = i + 1
+            for (j in b.indices) current[j + 1] = minOf(current[j] + 1, previous[j + 1] + 1,
+                previous[j] + if (a[i] == b[j]) 0 else 1)
+            previous = current
+        }
+        return previous[b.length]
+    }
 
     private fun plain(text: String): String = Normalizer.normalize(text.lowercase(Locale.forLanguageTag("pl-PL")), Normalizer.Form.NFD)
         .replace(Regex("\\p{M}"), "").replace('ł', 'l')
