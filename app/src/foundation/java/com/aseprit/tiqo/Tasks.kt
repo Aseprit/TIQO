@@ -23,6 +23,8 @@ interface TaskDao {
     fun observeDay(date: Long): Flow<List<Task>>
     @Query("SELECT * FROM tasks WHERE date BETWEEN :start AND :end ORDER BY date, createdAt, id LIMIT :limit")
     suspend fun range(start: Long, end: Long, limit: Int = 81): List<Task>
+    @Query("SELECT COUNT(*) FROM tasks WHERE date BETWEEN :start AND :end")
+    suspend fun count(start: Long, end: Long): Int
     @Query("SELECT * FROM tasks WHERE id = :id")
     suspend fun get(id: Long): Task?
     @Insert suspend fun insert(task: Task): Long

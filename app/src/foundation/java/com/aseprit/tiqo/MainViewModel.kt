@@ -14,6 +14,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val database = TaskDatabase.open(application)
     private val repository = TaskRepository(database)
     private val builder = ContextBuilder(repository.dao)
+    private val readFastPath = PlannerReadFastPath(builder)
     private val executor = ProposalExecutor(repository)
     val diagnostics = AiDiagnostics(application)
     private val engine = LlamaCppEngine(diagnostics)
@@ -66,16 +67,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun send(query: String) {
-        if (busy.value || !ready.value || query.isBlank()) return
+        if (busy.value || query.isBlank()) return
         require(query.length <= 2000)
+        val pureRead = readFastPath.accepts(query)
+        if (!pureRead && !ready.value) {
+            proposal.value = null
+            messages.value += ChatLine("Ty", query)
+            messages.value += ChatLine("Tiqo", "Załaduj model AI, aby uzyskać analizę lub zmienić plan.")
+            return
+        }
         busy.value = true
-        generating.value = true
+        generating.value = !pureRead
         proposal.value = null
         streaming.value = ""
         messages.value += ChatLine("Ty", query)
         diagnostics.begin("request")
         generation = viewModelScope.launch {
             try {
+                if (pureRead) {
+                    val answer = requireNotNull(readFastPath.handle(query, diagnostics))
+                    diagnostics.event("FAST_PATH_READ", "${answer.start}..${answer.end} tasks=${answer.taskCount}")
+                    diagnostics.stage("DONE", "tasks=${answer.taskCount}")
+                    messages.value += ChatLine("Tiqo", answer.text)
+                    return@launch
+                }
                 val snapshot = builder.build(query, diagnostics)
                 // History is display-only. Every inference gets a fresh Room snapshot.
                 val prompt = AdvisorPrompt.user(query, snapshot)

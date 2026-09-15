@@ -389,7 +389,7 @@ private fun Chat(vm: MainViewModel) {
             OutlinedTextField(query, { query = it.take(2000) }, Modifier.weight(1f), placeholder = { Text("Napisz albo podyktuj…", fontSize = 14.sp) },
                 shape = RoundedCornerShape(22.dp), maxLines = 3)
             Spacer(Modifier.width(8.dp))
-            FilledIconButton(enabled = generating || (ready && !busy && query.isNotBlank()), onClick = {
+            FilledIconButton(enabled = generating || (!busy && query.isNotBlank()), onClick = {
                 if (generating) vm.stop() else { vm.send(query); query = "" }
             }) { Icon(if (generating) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.Send, if (generating) "Zatrzymaj" else "Wyślij") }
         }

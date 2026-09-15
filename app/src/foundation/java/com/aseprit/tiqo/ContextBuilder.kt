@@ -8,6 +8,7 @@ import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
 
 data class DateScope(val start: LocalDate, val end: LocalDate)
+data class PlannerCountSnapshot(val today: String, val start: String, val end: String, val count: Int)
 data class PlannerSnapshot(val today: String, val start: String, val end: String, val tasks: List<Task>) {
     fun promptJson(): String = Gson().toJson(mapOf(
         "today" to today, "start" to start, "end" to end,
@@ -18,6 +19,15 @@ data class PlannerSnapshot(val today: String, val start: String, val end: String
 }
 
 class ContextBuilder(private val dao: TaskDao, private val clock: Clock = Clock.systemDefaultZone()) {
+    suspend fun count(query: String, diagnostics: AiDiagnostics? = null): PlannerCountSnapshot {
+        val today = LocalDate.now(clock)
+        val scope = resolve(query, today)
+        diagnostics?.event("ROOM_QUERY", "${scope.start}..${scope.end} count")
+        val count = dao.count(scope.start.toEpochDay(), scope.end.toEpochDay())
+        diagnostics?.event("ROOM_SNAPSHOT", "rows=$count")
+        return PlannerCountSnapshot(today.toString(), scope.start.toString(), scope.end.toString(), count)
+    }
+
     suspend fun build(query: String, diagnostics: AiDiagnostics? = null): PlannerSnapshot {
         diagnostics?.event("CONTEXT_BUILDER", "start")
         val today = LocalDate.now(clock)
