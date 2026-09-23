@@ -137,6 +137,8 @@ private fun Home(vm: MainViewModel) {
     val today = LocalDate.now()
     val monday = day.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
     val pending = tasks.filterNot { it.completed }
+    val lockedTasks = pending.filter { it.locked }
+    val aiTasks = pending.filterNot { it.locked }
     val completed = tasks.filter { it.completed }
     fun add() { editing = null; editor = true }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -174,9 +176,12 @@ private fun Home(vm: MainViewModel) {
                 }
             }
         }
-        items(pending, key = { it.id }) { task -> TaskRow(task, { vm.complete(task, !task.completed) }) { editing = task; editor = true } }
+        if (lockedTasks.isNotEmpty()) item { Label(if (aiTasks.isNotEmpty()) "ZAPLANOWANE" else "ZADANIA", Modifier.padding(top = 20.dp, bottom = 4.dp)) }
+        items(lockedTasks, key = { it.id }) { task -> TaskRow(task, { vm.complete(task, !task.completed) }, { vm.save(task.id, task.title, LocalDate.ofEpochDay(task.date).plusDays(1)) }) { editing = task; editor = true } }
+        if (aiTasks.isNotEmpty()) item { Label("ZAPROPONOWANE PRZEZ AI", Modifier.padding(top = 20.dp, bottom = 4.dp)) }
+        items(aiTasks, key = { it.id }) { task -> TaskRow(task, { vm.complete(task, !task.completed) }, { vm.save(task.id, task.title, LocalDate.ofEpochDay(task.date).plusDays(1)) }) { editing = task; editor = true } }
         if (completed.isNotEmpty()) item { Label("UKOŃCZONE ${completed.size}", Modifier.padding(top = 20.dp, bottom = 4.dp)) }
-        items(completed, key = { it.id }) { task -> TaskRow(task, { vm.complete(task, !task.completed) }) { editing = task; editor = true } }
+        items(completed, key = { it.id }) { task -> TaskRow(task, { vm.complete(task, !task.completed) }, null) { editing = task; editor = true } }
     }
     if (editor) TaskEditor(editing, day, { editor = false },
         { title, date -> vm.save(editing?.id, title, date); editor = false },
@@ -198,7 +203,7 @@ private fun DayCell(date: LocalDate, selected: Boolean, today: Boolean, modifier
 }
 
 @Composable
-private fun TaskRow(task: Task, toggle: () -> Unit, edit: () -> Unit) {
+private fun TaskRow(task: Task, toggle: () -> Unit, moveToTomorrow: (() -> Unit)?, edit: () -> Unit) {
     val haptic = LocalHapticFeedback.current
     val opacity by animateFloatAsState(if (task.completed) .48f else 1f, label = "completion")
     val fill by animateColorAsState(if (task.completed) MaterialTheme.colorScheme.primary else Color.Transparent, label = "check")
@@ -214,7 +219,13 @@ private fun TaskRow(task: Task, toggle: () -> Unit, edit: () -> Unit) {
             }
             Text(task.title, Modifier.weight(1f).padding(horizontal = 8.dp), fontSize = 17.sp, lineHeight = 23.sp,
                 textDecoration = if (task.completed) TextDecoration.LineThrough else null)
-            Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (moveToTomorrow != null && !task.completed) {
+                IconButton(onClick = moveToTomorrow, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Outlined.ChevronRight, "Przenieś na jutro", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else if (task.completed) {
+                Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
