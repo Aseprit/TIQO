@@ -383,6 +383,8 @@ class _SettingsConfigScreenState extends ConsumerState<SettingsConfigScreen> wit
                 backgroundColor: NothingColors.surfaceContainerLow,
                 child: Column(
                   children: [
+                    _buildInfoRow('APP VERSION', 'TIQO v1.0.1 (BUILD 2)'),
+                    const SizedBox(height: 12),
                     _buildInfoRow('FRAMEWORK', 'FLUTTER 3.47.7 // DART 3.13'),
                     const SizedBox(height: 12),
                     _buildInfoRow('DESIGN SYSTEM', 'NOTHING OS 3.0 // N-MATRIX'),
