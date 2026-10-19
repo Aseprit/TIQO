@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/nothing_theme.dart';
@@ -68,35 +67,32 @@ class FrostedGlassCard extends ConsumerWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(borderRadius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-          child: Container(
-            decoration: BoxDecoration(
-              color: backgroundColor,
-              borderRadius: BorderRadius.circular(borderRadius),
-              border: Border.all(
-                color: hasCrimsonGlow && borderColor == NothingColors.glassBorder
-                    ? NothingColors.crimson.withValues(alpha: 0.35)
-                    : borderColor,
-                width: borderWidth,
-              ),
+        child: Container(
+          decoration: BoxDecoration(
+            color: backgroundColor,
+            borderRadius: BorderRadius.circular(borderRadius),
+            border: Border.all(
+              color: hasCrimsonGlow && borderColor == NothingColors.glassBorder
+                  ? NothingColors.crimson.withValues(alpha: 0.35)
+                  : borderColor,
+              width: borderWidth,
             ),
-            child: Stack(
-              children: [
-                if (enableGlow)
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: AtmosphericGlowPainter(
-                        context: context,
-                        isEnabled: enableGlow,
-                        phaseOffset: effectiveOffset,
-                        seed: effectiveSeed,
-                      ),
+          ),
+          child: Stack(
+            children: [
+              if (enableGlow)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: AtmosphericGlowPainter(
+                      context: context,
+                      isEnabled: enableGlow,
+                      phaseOffset: effectiveOffset,
+                      seed: effectiveSeed,
                     ),
                   ),
-                innerContent,
-              ],
-            ),
+                ),
+              innerContent,
+            ],
           ),
         ),
       ),

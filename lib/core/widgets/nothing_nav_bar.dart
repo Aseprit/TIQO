@@ -168,26 +168,26 @@ class _TopCurvedBorderPainter extends CustomPainter {
       ..strokeWidth = strokeWidth;
 
     final halfStroke = strokeWidth / 2;
+    const double extendX = 2.0;
     final r = radius - halfStroke;
 
     final path = Path();
-    // Start at left edge at y = radius + 2, seamlessly meeting the edge and curving up
-    path.moveTo(halfStroke, radius + 2);
-    path.lineTo(halfStroke, radius);
+    // Smoothly enter from off-screen left without downward stubs
+    path.moveTo(-extendX, radius);
     path.arcTo(
-      Rect.fromLTWH(halfStroke, halfStroke, 2 * r, 2 * r),
+      Rect.fromLTWH(-extendX, halfStroke, 2 * r, 2 * r),
       pi,
       pi / 2,
       false,
     );
-    path.lineTo(size.width - radius, halfStroke);
+    path.lineTo(size.width + extendX - radius, halfStroke);
     path.arcTo(
-      Rect.fromLTWH(size.width - 2 * radius + halfStroke, halfStroke, 2 * r, 2 * r),
+      Rect.fromLTWH(size.width + extendX - 2 * radius + halfStroke, halfStroke, 2 * r, 2 * r),
       -pi / 2,
       pi / 2,
       false,
     );
-    path.lineTo(size.width - halfStroke, radius + 2);
+    path.lineTo(size.width + extendX, radius);
 
     canvas.drawPath(path, paint);
   }

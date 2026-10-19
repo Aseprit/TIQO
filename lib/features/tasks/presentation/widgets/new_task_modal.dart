@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,7 +49,16 @@ class _NewTaskModalState extends ConsumerState<NewTaskModal> {
   int? _reminderOffsetMinutes;
 
   bool _isCreatingCategory = false;
+  bool _isDismissing = false;
   int _selectedColorValue = 0xFFE11D2A;
+
+  void _safeDismiss() {
+    if (!_isDismissing && mounted && Navigator.of(context).canPop()) {
+      _isDismissing = true;
+      HapticFeedback.lightImpact();
+      Navigator.of(context).pop();
+    }
+  }
 
   final List<int> _availableColors = [
     0xFFE11D2A, // Crimson
@@ -82,7 +90,7 @@ class _NewTaskModalState extends ConsumerState<NewTaskModal> {
       _hasPomodoro = t.hasPomodoro;
       _reminderOffsetMinutes = t.reminderOffsetMinutes;
       _eventPickerMonth = t.date;
-      _isMoreOptionsExpanded = (t.hasPomodoro || t.reminderOffsetMinutes != null);
+      _isMoreOptionsExpanded = (t.hasPomodoro || t.reminderOffsetMinutes != null || t.category != 'CORE');
     } else {
       _selectedCategory = 'CORE';
       _eventRecurrence = EventRecurrence.none;
@@ -178,7 +186,7 @@ class _NewTaskModalState extends ConsumerState<NewTaskModal> {
       HapticFeedback.mediumImpact();
     }
 
-    Navigator.of(context).pop();
+    _safeDismiss();
   }
 
   void _saveNewCategory() {
@@ -197,639 +205,86 @@ class _NewTaskModalState extends ConsumerState<NewTaskModal> {
   @override
   Widget build(BuildContext context) {
     final categories = ref.watch(categoryListProvider);
+    final mediaQuery = MediaQuery.of(context);
+    final maxHeight = (mediaQuery.size.height - mediaQuery.viewInsets.bottom) * 0.90;
 
     return Padding(
       padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
+        bottom: mediaQuery.viewInsets.bottom,
       ),
       child: ClipRRect(
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: Container(
-            color: const Color(0xEE121212),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            child: SafeArea(
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Drag Handle
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: NothingColors.surfaceBright,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
+        child: Container(
+          constraints: BoxConstraints(
+            maxHeight: maxHeight,
+          ),
+          decoration: BoxDecoration(
+            color: const Color(0xFF121212),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border.all(color: NothingColors.glassBorderSubtle, width: 1),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 1. Fixed Top Header & Drag Handle (outside scrollview, allows swipe-down to dismiss)
+                _buildTopHeaderAndHandle(),
 
-                    // Header
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                // 2. Scrollable Body
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(left: 4, right: 10),
-                              child: Container(
-                                width: 9,
-                                height: 9,
-                                decoration: const BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: NothingColors.crimson,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: NothingColors.crimson,
-                                      blurRadius: 8,
-                                      spreadRadius: 2,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            Text(
-                              widget.taskToEdit != null ? 'EDIT TASK' : 'NEW TASK',
-                              style: NothingTypography.dotMatrix(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 1.2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-
-                    // 1. Task Type 3-Segment Switcher
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: NothingColors.surfaceContainerLowest,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: NothingColors.glassBorderSubtle),
-                      ),
-                      child: Row(
-                        children: [
-                          _buildTypeSegment('SINGLE TASK', TaskType.single),
-                          _buildTypeSegment('ROUTINE', TaskType.routine),
-                          _buildTypeSegment('EVENT', TaskType.event),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // 2. Task Name & Expandable Description Card
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: NothingColors.glassSurface,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: NothingColors.glassBorder),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'TASK TITLE',
-                            style: NothingTypography.dotMatrix(
-                              fontSize: 11,
-                              color: NothingColors.muted,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: _titleController,
-                            autofocus: widget.taskToEdit == null,
-                            style: NothingTypography.dotMatrix(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: NothingColors.pureWhite,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: 'What needs to be done?',
-                              hintStyle: NothingTypography.dotMatrix(
-                                fontSize: 14,
-                                color: NothingColors.muted.withValues(alpha: 0.6),
-                              ),
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          const Divider(color: NothingColors.glassBorderSubtle, height: 1),
-                          const SizedBox(height: 12),
-
-                          // Description toggle & field
-                          if (!_isDescriptionExpanded) ...[
-                            GestureDetector(
-                              onTap: () {
-                                HapticFeedback.selectionClick();
-                                setState(() => _isDescriptionExpanded = true);
-                              },
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.add_rounded, size: 14, color: NothingColors.crimson),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'ADD DESCRIPTION',
-                                    style: NothingTypography.dotMatrix(
-                                      fontSize: 10,
-                                      color: NothingColors.crimson,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 0.8,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ] else ...[
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'DESCRIPTION // NOTES (OPTIONAL)',
-                                  style: NothingTypography.dotMatrix(
-                                    fontSize: 10,
-                                    color: NothingColors.muted,
-                                    letterSpacing: 1.0,
-                                  ),
-                                ),
-                                GestureDetector(
-                                  onTap: () {
-                                    HapticFeedback.selectionClick();
-                                    setState(() {
-                                      _descriptionController.clear();
-                                      _isDescriptionExpanded = false;
-                                    });
-                                  },
-                                  child: Text(
-                                    '[CLEAR]',
-                                    style: NothingTypography.dotMatrix(
-                                      fontSize: 10,
-                                      color: NothingColors.muted,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            TextField(
-                              controller: _descriptionController,
-                              maxLines: 4,
-                              style: NothingTypography.sans(
-                                fontSize: 13,
-                                height: 1.4,
-                                color: NothingColors.pureWhite,
-                              ),
-                              decoration: InputDecoration(
-                                hintText: 'Add description, workout plan, or notes...',
-                                hintStyle: NothingTypography.sans(
-                                  fontSize: 12,
-                                  color: NothingColors.muted.withValues(alpha: 0.5),
-                                ),
-                                border: InputBorder.none,
-                                isDense: true,
-                                contentPadding: EdgeInsets.zero,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-
-                    // 3. Type-Specific Date / Routine / Event Section & Category
-                    if (_taskType == TaskType.single) ...[
-                      _buildSingleDateAndCategoryCard(categories),
-                    ] else if (_taskType == TaskType.routine) ...[
-                      _buildRoutineDayPicker(),
-                      const SizedBox(height: 12),
-                      _buildCompactCategoryCard(categories),
-                    ] else if (_taskType == TaskType.event) ...[
-                      _buildMultiDayEventPicker(),
-                      const SizedBox(height: 12),
-                      _buildCompactCategoryCard(categories),
-                    ],
-
-                    const SizedBox(height: 14),
-
-                    // 4. Schedule Time Toggle Card
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: NothingColors.glassSurface,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: _hasSchedule
-                              ? NothingColors.crimson.withValues(alpha: 0.5)
-                              : NothingColors.glassBorderSubtle,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  Container(
-                                    width: 28,
-                                    height: 28,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: _hasSchedule ? NothingColors.crimson : NothingColors.surfaceContainerHigh,
-                                    ),
-                                    child: const Icon(Icons.access_time_rounded, size: 16, color: NothingColors.pureWhite),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        'SCHEDULE TIME',
-                                        style: NothingTypography.dotMatrix(fontSize: 12, fontWeight: FontWeight.bold),
-                                      ),
-                                      Text(
-                                        _hasSchedule ? 'Hourly timeline placement' : 'All-day / anytime task',
-                                        style: NothingTypography.sans(fontSize: 10, color: NothingColors.muted),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              NothingToggle(
-                                value: _hasSchedule,
-                                onChanged: (val) {
-                                  HapticFeedback.selectionClick();
-                                  setState(() => _hasSchedule = val);
-                                },
-                              ),
-                            ],
-                          ),
-
-                          if (_hasSchedule) ...[
-                            const SizedBox(height: 14),
-                            Row(
-                              children: [
-                                // Start Time Dropdowns (HH : MM)
-                                Expanded(
-                                  flex: 3,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                    decoration: BoxDecoration(
-                                      color: NothingColors.surfaceContainerLow,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: NothingColors.glassBorderSubtle),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text('TIME:', style: NothingTypography.dotMatrix(fontSize: 10, color: NothingColors.muted, letterSpacing: 0.8)),
-                                        Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            DropdownButton<int>(
-                                              value: _startHour,
-                                              dropdownColor: NothingColors.surfaceContainerLowest,
-                                              underline: const SizedBox.shrink(),
-                                              isDense: true,
-                                              icon: const SizedBox.shrink(),
-                                              alignment: Alignment.center,
-                                              items: List.generate(24, (i) => i).map((h) {
-                                                return DropdownMenuItem(
-                                                  value: h,
-                                                  alignment: Alignment.center,
-                                                  child: Text(
-                                                    h.toString().padLeft(2, '0'),
-                                                    style: NothingTypography.dotMatrix(fontSize: 12, fontWeight: FontWeight.bold, color: NothingColors.pureWhite),
-                                                  ),
-                                                );
-                                              }).toList(),
-                                              onChanged: (val) {
-                                                if (val != null) setState(() => _startHour = val);
-                                              },
-                                            ),
-                                            Padding(
-                                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                                              child: Text(
-                                                ':',
-                                                style: NothingTypography.dotMatrix(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: NothingColors.crimson,
-                                                ),
-                                              ),
-                                            ),
-                                            DropdownButton<int>(
-                                              value: _startMinute,
-                                              dropdownColor: NothingColors.surfaceContainerLowest,
-                                              underline: const SizedBox.shrink(),
-                                              isDense: true,
-                                              icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: NothingColors.muted),
-                                              alignment: Alignment.center,
-                                              items: [0, 15, 30, 45].map((m) {
-                                                return DropdownMenuItem(
-                                                  value: m,
-                                                  alignment: Alignment.center,
-                                                  child: Text(
-                                                    m.toString().padLeft(2, '0'),
-                                                    style: NothingTypography.dotMatrix(fontSize: 12, fontWeight: FontWeight.bold, color: NothingColors.pureWhite),
-                                                  ),
-                                                );
-                                              }).toList(),
-                                              onChanged: (val) {
-                                                if (val != null) setState(() => _startMinute = val);
-                                              },
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                // Duration Selector
-                                Expanded(
-                                  flex: 2,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                    decoration: BoxDecoration(
-                                      color: NothingColors.surfaceContainerLow,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(color: NothingColors.glassBorderSubtle),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text('FOR:', style: NothingTypography.dotMatrix(fontSize: 10, color: NothingColors.muted, letterSpacing: 0.8)),
-                                        DropdownButton<int>(
-                                          value: _durationMinutes,
-                                          dropdownColor: NothingColors.surfaceContainerLowest,
-                                          underline: const SizedBox.shrink(),
-                                          isDense: true,
-                                          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: NothingColors.muted),
-                                          items: [
-                                            (15, '15m'),
-                                            (30, '30m'),
-                                            (45, '45m'),
-                                            (60, '1h'),
-                                            (90, '1.5h'),
-                                            (120, '2h'),
-                                            (180, '3h'),
-                                          ].map((pair) {
-                                            return DropdownMenuItem<int>(
-                                              value: pair.$1,
-                                              child: Text(
-                                                pair.$2,
-                                                style: NothingTypography.dotMatrix(
-                                                  fontSize: 12,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: NothingColors.pureWhite,
-                                                ),
-                                              ),
-                                            );
-                                          }).toList(),
-                                          onChanged: (val) {
-                                            if (val != null) setState(() => _durationMinutes = val);
-                                          },
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // 5. Expandable More Options (Reminder & Pomodoro)
-                    if (!_isMoreOptionsExpanded) ...[
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: () {
-                          HapticFeedback.selectionClick();
-                          setState(() => _isMoreOptionsExpanded = true);
-                        },
-                        child: Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        // Task Type 3-Segment Switcher
+                        Container(
+                          padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
                             color: NothingColors.surfaceContainerLowest,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(16),
                             border: Border.all(color: NothingColors.glassBorderSubtle),
                           ),
                           child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.tune_rounded, size: 14, color: NothingColors.muted),
-                              const SizedBox(width: 8),
-                              Text(
-                                '+ MORE OPTIONS (REMINDER, POMODORO)',
-                                style: NothingTypography.dotMatrix(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: NothingColors.muted,
-                                  letterSpacing: 1.0,
-                                ),
-                              ),
+                              _buildTypeSegment('SINGLE TASK', TaskType.single),
+                              _buildTypeSegment('ROUTINE', TaskType.routine),
+                              _buildTypeSegment('EVENT', TaskType.event),
                             ],
                           ),
                         ),
-                      ),
-                    ] else ...[
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: NothingColors.glassSurface,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: NothingColors.glassBorderSubtle),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'ADDITIONAL SETTINGS',
-                                  style: NothingTypography.dotMatrix(
-                                    fontSize: 10,
-                                    color: NothingColors.muted,
-                                    letterSpacing: 1.2,
-                                  ),
-                                ),
-                                GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    HapticFeedback.selectionClick();
-                                    setState(() => _isMoreOptionsExpanded = false);
-                                  },
-                                  child: Text(
-                                    '[HIDE OPTIONS]',
-                                    style: NothingTypography.dotMatrix(
-                                      fontSize: 10,
-                                      color: NothingColors.crimson,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
+                        const SizedBox(height: 16),
 
-                            // Reminder Selector
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    Container(
-                                      width: 26,
-                                      height: 26,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: _reminderOffsetMinutes != null ? NothingColors.crimson : NothingColors.surfaceContainerHigh,
-                                      ),
-                                      child: const Icon(Icons.notifications_active_outlined, size: 14, color: NothingColors.pureWhite),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text('REMINDER', style: NothingTypography.dotMatrix(fontSize: 11, fontWeight: FontWeight.bold)),
-                                        Text('Glyph flash & alert', style: NothingTypography.sans(fontSize: 9, color: NothingColors.muted)),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: NothingColors.surfaceContainerLow,
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: NothingColors.glassBorderSubtle),
-                                  ),
-                                  child: DropdownButton<int?>(
-                                    value: _reminderOffsetMinutes,
-                                    dropdownColor: NothingColors.surfaceContainerLowest,
-                                    underline: const SizedBox.shrink(),
-                                    isDense: true,
-                                    icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: NothingColors.muted),
-                                    items: const [
-                                      (null, 'NONE'),
-                                      (0, 'AT START'),
-                                      (5, '5M BEFORE'),
-                                      (15, '15M BEFORE'),
-                                      (30, '30M BEFORE'),
-                                      (1440, '1 DAY BEFORE'),
-                                    ].map((pair) {
-                                      return DropdownMenuItem<int?>(
-                                        value: pair.$1,
-                                        child: Text(
-                                          pair.$2,
-                                          style: NothingTypography.dotMatrix(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: NothingColors.pureWhite,
-                                            letterSpacing: 0.8,
-                                          ),
-                                        ),
-                                      );
-                                    }).toList(),
-                                    onChanged: (val) {
-                                      HapticFeedback.selectionClick();
-                                      setState(() => _reminderOffsetMinutes = val);
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            const Divider(color: NothingColors.glassBorderSubtle, height: 1),
-                            const SizedBox(height: 12),
+                        // Task Title & Expandable Description Card
+                        _buildTitleAndDescriptionCard(),
+                        const SizedBox(height: 16),
 
-                            // Pomodoro Timer Toggle
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Row(
-                                  children: [
-                                    Container(
-                                      width: 26,
-                                      height: 26,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: _hasPomodoro ? NothingColors.crimson : NothingColors.surfaceContainerHigh,
-                                      ),
-                                      child: const Icon(Icons.timer_outlined, size: 14, color: NothingColors.pureWhite),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text('POMODORO FOCUS', style: NothingTypography.dotMatrix(fontSize: 11, fontWeight: FontWeight.bold)),
-                                        Text('Glyph countdown bar', style: NothingTypography.sans(fontSize: 9, color: NothingColors.muted)),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                                NothingToggle(
-                                  value: _hasPomodoro,
-                                  onChanged: (val) {
-                                    HapticFeedback.selectionClick();
-                                    setState(() => _hasPomodoro = val);
-                                  },
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                        // Type-Specific Date / Routine / Event Section
+                        if (_taskType == TaskType.single) ...[
+                          _buildFullWidthDatePicker(),
+                        ] else if (_taskType == TaskType.routine) ...[
+                          _buildRoutineDayPicker(),
+                        ] else if (_taskType == TaskType.event) ...[
+                          _buildMultiDayEventPicker(),
+                        ],
+                        const SizedBox(height: 14),
 
-                    const SizedBox(height: 20),
-                    const SizedBox(height: 24),
+                        // Schedule Time Toggle Card
+                        _buildScheduleTimeCard(),
+                        const SizedBox(height: 14),
 
-                    // Submit Button
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _submit,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: NothingColors.crimson,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          elevation: 0,
-                        ),
-                        child: Text(
-                          widget.taskToEdit != null ? 'SAVE CHANGES' : 'CREATE TASK',
-                          style: NothingTypography.dotMatrix(
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1.5,
-                            color: NothingColors.pureWhite,
-                          ),
-                        ),
-                      ),
+                        // Expandable More Options (Category, Reminder, Pomodoro)
+                        _buildMoreOptionsSection(categories),
+                        const SizedBox(height: 16),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                  ],
+                  ),
                 ),
-              ),
+
+                // 3. Pinned Bottom Action Button (Sticky Footer above System Navigation Bar)
+                _buildPinnedBottomAction(),
+              ],
             ),
           ),
         ),
@@ -868,45 +323,380 @@ class _NewTaskModalState extends ConsumerState<NewTaskModal> {
     );
   }
 
-  Widget _buildSingleDateAndCategoryCard(List<CategoryModel> categories) {
+  Widget _buildTopHeaderAndHandle() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onVerticalDragUpdate: (details) {
+        if (details.primaryDelta != null && details.primaryDelta! > 1.5) {
+          _safeDismiss();
+        }
+      },
+      onVerticalDragEnd: (details) {
+        if (details.primaryVelocity != null && details.primaryVelocity! > 30) {
+          _safeDismiss();
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.only(top: 12, bottom: 8, left: 20, right: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Drag handle pill
+            Center(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _safeDismiss,
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: NothingColors.surfaceBright,
+                    borderRadius: BorderRadius.circular(2.5),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            // Header row with Dismiss action
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, right: 10),
+                      child: Container(
+                        width: 9,
+                        height: 9,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: NothingColors.crimson,
+                          boxShadow: [
+                            BoxShadow(
+                              color: NothingColors.crimson,
+                              blurRadius: 8,
+                              spreadRadius: 2,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Text(
+                      widget.taskToEdit != null ? 'EDIT TASK' : 'NEW TASK',
+                      style: NothingTypography.dotMatrix(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                  ],
+                ),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _safeDismiss,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Text(
+                      '[DISMISS]',
+                      style: NothingTypography.dotMatrix(
+                        fontSize: 10,
+                        color: NothingColors.muted,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTitleAndDescriptionCard() {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: NothingColors.glassSurface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: NothingColors.glassBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'TASK TITLE',
+            style: NothingTypography.dotMatrix(
+              fontSize: 11,
+              color: NothingColors.muted,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _titleController,
+            autofocus: widget.taskToEdit == null,
+            style: NothingTypography.dotMatrix(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: NothingColors.pureWhite,
+            ),
+            decoration: InputDecoration(
+              hintText: 'What needs to be done?',
+              hintStyle: NothingTypography.dotMatrix(
+                fontSize: 14,
+                color: NothingColors.muted.withValues(alpha: 0.6),
+              ),
+              border: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Divider(color: NothingColors.glassBorderSubtle, height: 1),
+          const SizedBox(height: 12),
+
+          // Description toggle & field
+          if (!_isDescriptionExpanded) ...[
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() => _isDescriptionExpanded = true);
+              },
+              child: Row(
+                children: [
+                  const Icon(Icons.add_rounded, size: 14, color: NothingColors.crimson),
+                  const SizedBox(width: 6),
+                  Text(
+                    'ADD DESCRIPTION',
+                    style: NothingTypography.dotMatrix(
+                      fontSize: 10,
+                      color: NothingColors.crimson,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'DESCRIPTION // NOTES (OPTIONAL)',
+                  style: NothingTypography.dotMatrix(
+                    fontSize: 10,
+                    color: NothingColors.muted,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    setState(() {
+                      _descriptionController.clear();
+                      _isDescriptionExpanded = false;
+                    });
+                  },
+                  child: Text(
+                    '[CLEAR]',
+                    style: NothingTypography.dotMatrix(
+                      fontSize: 10,
+                      color: NothingColors.muted,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _descriptionController,
+              maxLines: 4,
+              style: NothingTypography.sans(
+                fontSize: 13,
+                height: 1.4,
+                color: NothingColors.pureWhite,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Add description, workout plan, or notes...',
+                hintStyle: NothingTypography.sans(
+                  fontSize: 12,
+                  color: NothingColors.muted.withValues(alpha: 0.5),
+                ),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFullWidthDatePicker() {
+    final isToday = DateUtils.isSameDay(_selectedDate, DateTime.now());
+    final isTomorrow = DateUtils.isSameDay(_selectedDate, DateTime.now().add(const Duration(days: 1)));
+
+    String datePrefix = '';
+    if (isToday) {
+      datePrefix = 'TODAY // ';
+    } else if (isTomorrow) {
+      datePrefix = 'TOMORROW // ';
+    }
+
+    final formattedDate = '$datePrefix${DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate).toUpperCase()}';
+
+    return Container(
       decoration: BoxDecoration(
         color: NothingColors.glassSurface,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: NothingColors.glassBorderSubtle),
       ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () async {
+            HapticFeedback.selectionClick();
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: _selectedDate,
+              firstDate: DateTime.now().subtract(const Duration(days: 365)),
+              lastDate: DateTime.now().add(const Duration(days: 730)),
+              builder: (ctx, child) => Theme(
+                data: ThemeData.dark().copyWith(
+                  colorScheme: const ColorScheme.dark(
+                    primary: NothingColors.crimson,
+                    surface: NothingColors.surfaceContainerLow,
+                  ),
+                ),
+                child: child!,
+              ),
+            );
+            if (picked != null) {
+              setState(() => _selectedDate = picked);
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: NothingColors.surfaceContainerHigh,
+                  ),
+                  child: const Icon(Icons.calendar_today_rounded, size: 15, color: NothingColors.crimson),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'TASK DATE',
+                        style: NothingTypography.dotMatrix(
+                          fontSize: 9,
+                          color: NothingColors.muted,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        formattedDate,
+                        style: NothingTypography.dotMatrix(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: NothingColors.pureWhite,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.edit_calendar_rounded,
+                  size: 18,
+                  color: NothingColors.muted,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScheduleTimeCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: NothingColors.glassSurface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: _hasSchedule
+              ? NothingColors.crimson.withValues(alpha: 0.5)
+              : NothingColors.glassBorderSubtle,
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Left: Task Date Selector
-              Expanded(
-                flex: 5,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () async {
-                    HapticFeedback.selectionClick();
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: _selectedDate,
-                      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                      lastDate: DateTime.now().add(const Duration(days: 730)),
-                      builder: (ctx, child) => Theme(
-                        data: ThemeData.dark().copyWith(
-                          colorScheme: const ColorScheme.dark(
-                            primary: NothingColors.crimson,
-                            surface: NothingColors.surfaceContainerLow,
-                          ),
-                        ),
-                        child: child!,
+              Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _hasSchedule ? NothingColors.crimson : NothingColors.surfaceContainerHigh,
+                    ),
+                    child: const Icon(Icons.access_time_rounded, size: 16, color: NothingColors.pureWhite),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'SCHEDULE TIME',
+                        style: NothingTypography.dotMatrix(fontSize: 12, fontWeight: FontWeight.bold),
                       ),
-                    );
-                    if (picked != null) {
-                      setState(() => _selectedDate = picked);
-                    }
-                  },
+                      Text(
+                        _hasSchedule ? 'Hourly timeline placement' : 'All-day / anytime task',
+                        style: NothingTypography.sans(fontSize: 10, color: NothingColors.muted),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              NothingToggle(
+                value: _hasSchedule,
+                onChanged: (val) {
+                  HapticFeedback.selectionClick();
+                  setState(() => _hasSchedule = val);
+                },
+              ),
+            ],
+          ),
+
+          if (_hasSchedule) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                // Start Time Dropdowns (HH : MM)
+                Expanded(
+                  flex: 3,
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
@@ -915,104 +705,197 @@ class _NewTaskModalState extends ConsumerState<NewTaskModal> {
                       border: Border.all(color: NothingColors.glassBorderSubtle),
                     ),
                     child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Icon(Icons.calendar_today_rounded, size: 14, color: NothingColors.crimson),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('DATE', style: NothingTypography.dotMatrix(fontSize: 9, color: NothingColors.muted, letterSpacing: 0.8)),
-                              const SizedBox(height: 2),
-                              Text(
-                                DateFormat('MMM dd, yyyy').format(_selectedDate).toUpperCase(),
-                                style: NothingTypography.dotMatrix(fontSize: 11, fontWeight: FontWeight.bold, color: NothingColors.pureWhite),
-                                overflow: TextOverflow.ellipsis,
+                        Text('TIME:', style: NothingTypography.dotMatrix(fontSize: 10, color: NothingColors.muted, letterSpacing: 0.8)),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            DropdownButton<int>(
+                              value: _startHour,
+                              dropdownColor: NothingColors.surfaceContainerLowest,
+                              underline: const SizedBox.shrink(),
+                              isDense: true,
+                              icon: const SizedBox.shrink(),
+                              alignment: Alignment.center,
+                              items: List.generate(24, (i) => i).map((h) {
+                                return DropdownMenuItem(
+                                  value: h,
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    h.toString().padLeft(2, '0'),
+                                    style: NothingTypography.dotMatrix(fontSize: 12, fontWeight: FontWeight.bold, color: NothingColors.pureWhite),
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val != null) setState(() => _startHour = val);
+                              },
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              child: Text(
+                                ':',
+                                style: NothingTypography.dotMatrix(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: NothingColors.crimson,
+                                ),
                               ),
-                            ],
-                          ),
+                            ),
+                            DropdownButton<int>(
+                              value: _startMinute,
+                              dropdownColor: NothingColors.surfaceContainerLowest,
+                              underline: const SizedBox.shrink(),
+                              isDense: true,
+                              icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: NothingColors.muted),
+                              alignment: Alignment.center,
+                              items: [0, 15, 30, 45].map((m) {
+                                return DropdownMenuItem(
+                                  value: m,
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    m.toString().padLeft(2, '0'),
+                                    style: NothingTypography.dotMatrix(fontSize: 12, fontWeight: FontWeight.bold, color: NothingColors.pureWhite),
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val != null) setState(() => _startMinute = val);
+                              },
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 8),
-
-              // Right: Category Dropdown Chip
-              Expanded(
-                flex: 5,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: NothingColors.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: NothingColors.glassBorderSubtle),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('CATEGORY', style: NothingTypography.dotMatrix(fontSize: 9, color: NothingColors.muted, letterSpacing: 0.8)),
-                          GestureDetector(
-                            onTap: () => setState(() => _isCreatingCategory = !_isCreatingCategory),
-                            child: Text(
-                              _isCreatingCategory ? '[X]' : '[+]',
-                              style: NothingTypography.dotMatrix(fontSize: 9, color: NothingColors.crimson, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      DropdownButton<String>(
-                        value: categories.any((c) => c.name == _selectedCategory) ? _selectedCategory : categories.first.name,
-                        dropdownColor: NothingColors.surfaceContainerLowest,
-                        underline: const SizedBox.shrink(),
-                        isDense: true,
-                        isExpanded: true,
-                        icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: NothingColors.muted),
-                        items: categories.map((cat) {
-                          return DropdownMenuItem<String>(
-                            value: cat.name,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: Color(cat.colorValue))),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: Text(
-                                    cat.name,
-                                    style: NothingTypography.dotMatrix(fontSize: 11, fontWeight: FontWeight.bold, color: NothingColors.pureWhite),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
+                const SizedBox(width: 8),
+                // Duration Selector
+                Expanded(
+                  flex: 2,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: NothingColors.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: NothingColors.glassBorderSubtle),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('FOR:', style: NothingTypography.dotMatrix(fontSize: 10, color: NothingColors.muted, letterSpacing: 0.8)),
+                        DropdownButton<int>(
+                          value: _durationMinutes,
+                          dropdownColor: NothingColors.surfaceContainerLowest,
+                          underline: const SizedBox.shrink(),
+                          isDense: true,
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: NothingColors.muted),
+                          items: [
+                            (15, '15m'),
+                            (30, '30m'),
+                            (45, '45m'),
+                            (60, '1h'),
+                            (90, '1.5h'),
+                            (120, '2h'),
+                            (180, '3h'),
+                          ].map((pair) {
+                            return DropdownMenuItem<int>(
+                              value: pair.$1,
+                              child: Text(
+                                pair.$2,
+                                style: NothingTypography.dotMatrix(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: NothingColors.pureWhite,
                                 ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: (val) {
-                          if (val != null) setState(() => _selectedCategory = val);
-                        },
-                      ),
-                    ],
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) setState(() => _durationMinutes = val);
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-
-          if (_isCreatingCategory) ...[
-            const SizedBox(height: 10),
-            _buildInlineCategoryCreator(),
+              ],
+            ),
           ],
         ],
       ),
     );
   }
 
-  Widget _buildCompactCategoryCard(List<CategoryModel> categories) {
+  Widget _buildMoreOptionsSection(List<CategoryModel> categories) {
+    if (!_isMoreOptionsExpanded) {
+      final currentCat = categories.firstWhere(
+        (c) => c.name == _selectedCategory,
+        orElse: () => categories.isNotEmpty ? categories.first : const CategoryModel(id: 'core', name: 'CORE', colorValue: 0xFFE11D2A),
+      );
+
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          setState(() => _isMoreOptionsExpanded = true);
+        },
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          decoration: BoxDecoration(
+            color: NothingColors.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: NothingColors.glassBorderSubtle),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.tune_rounded, size: 14, color: NothingColors.muted),
+                  const SizedBox(width: 8),
+                  Text(
+                    '+ MORE OPTIONS',
+                    style: NothingTypography.dotMatrix(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: NothingColors.muted,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                ],
+              ),
+              Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Color(currentCat.colorValue),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _selectedCategory,
+                    style: NothingTypography.dotMatrix(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: NothingColors.pureWhite,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: NothingColors.muted),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1026,61 +909,285 @@ class _NewTaskModalState extends ConsumerState<NewTaskModal> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('TASK CATEGORY', style: NothingTypography.dotMatrix(fontSize: 10, color: NothingColors.muted, letterSpacing: 1.0)),
+              Text(
+                'ADDITIONAL SETTINGS',
+                style: NothingTypography.dotMatrix(
+                  fontSize: 10,
+                  color: NothingColors.muted,
+                  letterSpacing: 1.2,
+                ),
+              ),
               GestureDetector(
-                onTap: () => setState(() => _isCreatingCategory = !_isCreatingCategory),
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  setState(() => _isMoreOptionsExpanded = false);
+                },
                 child: Text(
-                  _isCreatingCategory ? '[CANCEL]' : '[+ CREATE]',
-                  style: NothingTypography.dotMatrix(fontSize: 10, color: NothingColors.crimson, fontWeight: FontWeight.bold),
+                  '[HIDE OPTIONS]',
+                  style: NothingTypography.dotMatrix(
+                    fontSize: 10,
+                    color: NothingColors.crimson,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: categories.map((cat) {
-              final isSelected = _selectedCategory == cat.name;
-              return GestureDetector(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  setState(() => _selectedCategory = cat.name);
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: isSelected ? NothingColors.crimson : NothingColors.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: isSelected ? NothingColors.crimson : NothingColors.glassBorderSubtle,
-                    ),
+          const SizedBox(height: 12),
+
+          // 1. Task Category Selector & Creator
+          _buildCategorySectionInMoreOptions(categories),
+          const SizedBox(height: 12),
+          const Divider(color: NothingColors.glassBorderSubtle, height: 1),
+          const SizedBox(height: 12),
+
+          // 2. Reminder Selector
+          _buildReminderRow(),
+          const SizedBox(height: 12),
+          const Divider(color: NothingColors.glassBorderSubtle, height: 1),
+          const SizedBox(height: 12),
+
+          // 3. Pomodoro Focus Timer Toggle
+          _buildPomodoroRow(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategorySectionInMoreOptions(List<CategoryModel> categories) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 26,
+                  height: 26,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: NothingColors.surfaceContainerHigh,
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(width: 5, height: 5, decoration: BoxDecoration(shape: BoxShape.circle, color: Color(cat.colorValue))),
-                      const SizedBox(width: 5),
-                      Text(
-                        cat.name,
-                        style: NothingTypography.dotMatrix(
-                          fontSize: 10,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                          color: isSelected ? NothingColors.pureWhite : NothingColors.muted,
-                        ),
+                  child: const Icon(Icons.label_outline_rounded, size: 14, color: NothingColors.pureWhite),
+                ),
+                const SizedBox(width: 10),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('TASK CATEGORY', style: NothingTypography.dotMatrix(fontSize: 11, fontWeight: FontWeight.bold)),
+                    Text('Organization tag', style: NothingTypography.sans(fontSize: 9, color: NothingColors.muted)),
+                  ],
+                ),
+              ],
+            ),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _isCreatingCategory = !_isCreatingCategory),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  _isCreatingCategory ? '[CANCEL]' : '[+ CREATE]',
+                  style: NothingTypography.dotMatrix(
+                    fontSize: 10,
+                    color: NothingColors.crimson,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: categories.map((cat) {
+            final isSelected = _selectedCategory == cat.name;
+            return GestureDetector(
+              onTap: () {
+                HapticFeedback.selectionClick();
+                setState(() => _selectedCategory = cat.name);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isSelected ? NothingColors.crimson : NothingColors.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: isSelected ? NothingColors.crimson : NothingColors.glassBorderSubtle,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 5,
+                      height: 5,
+                      decoration: BoxDecoration(shape: BoxShape.circle, color: Color(cat.colorValue)),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      cat.name,
+                      style: NothingTypography.dotMatrix(
+                        fontSize: 10,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected ? NothingColors.pureWhite : NothingColors.muted,
                       ),
-                    ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        if (_isCreatingCategory) ...[
+          const SizedBox(height: 10),
+          _buildInlineCategoryCreator(),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildReminderRow() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _reminderOffsetMinutes != null ? NothingColors.crimson : NothingColors.surfaceContainerHigh,
+              ),
+              child: const Icon(Icons.notifications_active_outlined, size: 14, color: NothingColors.pureWhite),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('REMINDER', style: NothingTypography.dotMatrix(fontSize: 11, fontWeight: FontWeight.bold)),
+                Text('Glyph flash & alert', style: NothingTypography.sans(fontSize: 9, color: NothingColors.muted)),
+              ],
+            ),
+          ],
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: NothingColors.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: NothingColors.glassBorderSubtle),
+          ),
+          child: DropdownButton<int?>(
+            value: _reminderOffsetMinutes,
+            dropdownColor: NothingColors.surfaceContainerLowest,
+            underline: const SizedBox.shrink(),
+            isDense: true,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: NothingColors.muted),
+            items: const [
+              (null, 'NONE'),
+              (0, 'AT START'),
+              (5, '5M BEFORE'),
+              (15, '15M BEFORE'),
+              (30, '30M BEFORE'),
+              (1440, '1 DAY BEFORE'),
+            ].map((pair) {
+              return DropdownMenuItem<int?>(
+                value: pair.$1,
+                child: Text(
+                  pair.$2,
+                  style: NothingTypography.dotMatrix(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: NothingColors.pureWhite,
+                    letterSpacing: 0.8,
                   ),
                 ),
               );
             }).toList(),
+            onChanged: (val) {
+              HapticFeedback.selectionClick();
+              setState(() => _reminderOffsetMinutes = val);
+            },
           ),
-          if (_isCreatingCategory) ...[
-            const SizedBox(height: 10),
-            _buildInlineCategoryCreator(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPomodoroRow() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _hasPomodoro ? NothingColors.crimson : NothingColors.surfaceContainerHigh,
+              ),
+              child: const Icon(Icons.timer_outlined, size: 14, color: NothingColors.pureWhite),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('POMODORO FOCUS', style: NothingTypography.dotMatrix(fontSize: 11, fontWeight: FontWeight.bold)),
+                Text('Glyph countdown bar', style: NothingTypography.sans(fontSize: 9, color: NothingColors.muted)),
+              ],
+            ),
           ],
-        ],
+        ),
+        NothingToggle(
+          value: _hasPomodoro,
+          onChanged: (val) {
+            HapticFeedback.selectionClick();
+            setState(() => _hasPomodoro = val);
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPinnedBottomAction() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFF141414),
+        border: Border(
+          top: BorderSide(color: NothingColors.glassBorderSubtle, width: 1),
+        ),
+      ),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          onPressed: _submit,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: NothingColors.crimson,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            elevation: 0,
+          ),
+          child: Text(
+            widget.taskToEdit != null ? 'SAVE CHANGES' : 'CREATE TASK',
+            style: NothingTypography.dotMatrix(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.5,
+              color: NothingColors.pureWhite,
+            ),
+          ),
+        ),
       ),
     );
   }
